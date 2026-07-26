@@ -266,9 +266,9 @@ struct EntryStreamView: View {
                     ForEach(model.entries) { entry in
                         EntryEditor(
                             entry: entry,
-                            text: binding(for: entry.id)
+                            text: binding(for: entry.id),
+                            focusedEntryID: $focusedEntryID
                         )
-                        .focused($focusedEntryID, equals: entry.id)
                         .id(entry.id)
                     }
                 }
@@ -277,14 +277,10 @@ struct EntryStreamView: View {
             }
             .background(Color(nsColor: .textBackgroundColor))
             .onAppear {
-                focusedEntryID = model.currentEntryID
+                focusCurrentEntry(proxy: proxy, animated: false)
             }
             .onChange(of: model.currentEntryID) { id in
-                guard let id else { return }
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(id, anchor: .bottom)
-                }
-                focusedEntryID = id
+                focusCurrentEntry(proxy: proxy, animated: id != nil)
             }
         }
         .overlay(alignment: .bottomLeading) {
@@ -305,11 +301,26 @@ struct EntryStreamView: View {
             set: { model.updateBody(for: id, body: $0) }
         )
     }
+
+    private func focusCurrentEntry(proxy: ScrollViewProxy, animated: Bool) {
+        guard let id = model.currentEntryID else { return }
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(id, anchor: .bottom)
+                }
+            } else {
+                proxy.scrollTo(id, anchor: .bottom)
+            }
+            focusedEntryID = id
+        }
+    }
 }
 
 struct EntryEditor: View {
     let entry: Entry
     @Binding var text: String
+    var focusedEntryID: FocusState<Entry.ID?>.Binding
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
@@ -318,6 +329,7 @@ struct EntryEditor: View {
                 .foregroundStyle(.secondary)
             TextEditor(text: $text)
                 .font(.system(size: 17, weight: .regular, design: .serif))
+                .focused(focusedEntryID, equals: entry.id)
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 96)
                 .padding(.horizontal, -5)
