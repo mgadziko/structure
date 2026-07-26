@@ -32,7 +32,7 @@ This is not a secondary convenience. It is one of the main reasons the app shoul
 Early capture should favor:
 
 - free typing as the default state
-- a fast New Entry command for separating one Entry from the next
+- a fast New Entry command, `Command-E`, for separating one Entry from the next
 - immediate typing focus
 - automatic persistence, with no save dialog or save-location decision during capture
 - minimal required UI
@@ -45,7 +45,7 @@ Early capture should favor:
 The first capture interface can be understood as three actions:
 
 1. Type freely.
-2. Press New Entry when the current thought should become separate from the next one.
+2. Press New Entry, `Command-E`, when the current thought should become separate from the next one.
 3. Optionally use List when the thought naturally contains parallel points.
 
 Everything else should wait. Saving, filing, categorizing, formatting, and view placement should happen automatically or later.
@@ -59,6 +59,34 @@ The first implementation target is macOS.
 Version 1 is local-only. Sync is not a v1 feature, but the model should avoid choices that would make later sync painful. Cross-platform support for Windows, Linux, iOS, and Android is a background architectural concern, not a defining constraint for the first prototype.
 
 The first prototype should prove the core interaction rather than solve every future platform and cloud problem.
+
+## Library And Window Model
+
+The default user story is one Library per user. A Library is the underlying local database that contains Entries, Items, Attributes, Categories, Assignments, Views, Rules, and change history.
+
+A window should not imply a separate Library. On macOS, `Command-N` should create a new Window or View, while `Command-E` should create a new Entry in the frontmost Window or View. Multiple windows should usually be different workspaces or Views into the same Library. For example, a shopping list window and a vacation-planning window should both refer to the same Library unless the user explicitly opens or creates another Library.
+
+This matters because Structure's value depends on emergent correlation. People, dates, places, purchases, tasks, and events become more useful when they can be discovered across the user's captured information.
+
+However, Structure should not assume that one Library is the only possible model. Some users may need hard boundaries between unrelated information worlds. Examples include personal and workplace information, a Dungeons and Dragons campaign Library separate from ordinary life, client-specific Libraries, archive Libraries, and experimental import or scratch Libraries.
+
+Multiple Libraries should therefore be a later explicit feature, not an accidental result of opening a new window. Creating or switching Libraries can involve a deliberate user decision because it changes the information boundary. Creating an Entry should not.
+
+The one-Library default also supports the no-Save-command paradigm. During normal use, the user should type Entries, close windows, or quit the app without manually deciding where or whether to save a file. Persistence is part of the Library, not a document-management chore.
+
+Initial prototype assumption:
+
+- one local Library
+- one SQLite database
+- one or more windows may eventually point into that Library
+- no multi-Library UI in v1
+
+Future model:
+
+- multiple Libraries may exist
+- each Library has its own database, encryption boundary, sync identity, and search index
+- windows are associated with a selected Library
+- cross-Library search or correlation should not happen by default
 
 ## Core Vocabulary
 
@@ -280,3 +308,16 @@ The following are intentionally out of initial scope:
 - enterprise administration
 
 These may matter later. They should not distract from proving the core Entry, Item, Category, Assignment, and View model first.
+
+## Future: Starter Libraries And Templates
+
+Lotus Agenda shipped with several predesigned templates for specific purposes, such as client tracking and advanced planning/to-do workflows. Structure may eventually benefit from starter Libraries, starter Views, or template packs that demonstrate useful structure without forcing it on every user.
+
+Possible future examples:
+
+- client list with Views for client name, last contact date, sales, and purchased products
+- planning Library with task states, dates, priorities, and review Views
+- household/shopping starter with shopping Categories and purchased/wanted States
+- project tracker with people, dates, milestones, and open loops
+
+These should not interfere with frictionless creation. The default first-run experience should still allow immediate typing without choosing a template. Templates should be optional aids for users who want a prebuilt structure, not a required onboarding decision.

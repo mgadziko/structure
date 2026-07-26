@@ -23,3 +23,30 @@ The first implementation will begin on macOS. Longer-term portability should fav
 - [Product Design](docs/product-design.md)
 - [Capture Interaction Spec](docs/capture-interaction.md)
 - [Data Model Sketch](docs/data-model.md)
+- [Naming Notes](docs/naming.md)
+
+## Prototype Build
+
+Build the command-line Swift package:
+
+```sh
+swift build
+```
+
+Build the runnable macOS app bundle:
+
+```sh
+./scripts/build-macos-app.sh
+```
+
+The current app bundle is written to:
+
+```text
+dist/Structure.app
+```
+
+The prototype stores local data at:
+
+```text
+~/Library/Application Support/Structure/Structure.sqlite
+```

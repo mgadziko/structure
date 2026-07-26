@@ -4,7 +4,7 @@ This document defines the first Structure capture experience. It is intentionall
 
 ## Principle
 
-Frictionless creation means the user can put an Entry into Structure before making decisions about naming, filing, formatting, categorizing, or saving.
+Frictionless creation means the user can put an Entry into Structure before making decisions about naming, filing, formatting, categorizing, or saving. The one-Library model supports this directly: the user types Entries, quits when done, and never has to manually save a file during normal use.
 
 The capture surface should communicate: write first, structure later.
 
@@ -20,7 +20,7 @@ The initial window should support:
 - immediate typing focus
 - automatic persistence
 - a clear current Entry insertion point
-- a fast New Entry action
+- a fast New Entry action, `Command-E`
 - an optional List action
 
 The initial window should avoid:
@@ -46,7 +46,7 @@ No explicit save action should be required. The Entry should be persisted automa
 
 New Entry is the main structural action during capture.
 
-When the user decides the current thought should be separate from the next thought, they press New Entry. Structure creates a new Entry, assigns timestamps, persists it, and moves typing focus into the new Entry.
+When the user decides the current thought should be separate from the next thought, they press New Entry, `Command-E`. Structure creates a new Entry, assigns timestamps, persists it, and moves typing focus into the new Entry.
 
 New Entry should not ask for:
 
@@ -112,7 +112,7 @@ The first prototype should pass this simple test:
 
 1. Open Structure.
 2. Type a sentence.
-3. Press New Entry.
+3. Press New Entry with `Command-E`.
 4. Type another sentence.
 5. Scroll back to the first Entry.
 6. Scroll down to the latest Entry.
@@ -120,3 +120,42 @@ The first prototype should pass this simple test:
 8. Confirm both Entries remain, with timestamps preserved.
 
 If the user had to name, save, file, categorize, format, or configure anything during those steps, the prototype failed the frictionless creation principle.
+
+## Future: Window-Level Category Context
+
+Deferred feature, not part of the first prototype.
+
+While typing Entries, the user may realize that the current window or View has a common Category that should apply to Entries already created there and to future Entries created there.
+
+Example:
+
+1. The user creates two Entries that are really part of a shopping list.
+2. The user invokes a keyboard command, possibly `Command-L` for List.
+3. Structure asks for or accepts a Category name, such as `Shopping`.
+4. Structure assigns that Category to the existing Entries in the current window or View.
+5. Future Entries created in that same window or View inherit the same Category context until the context is changed or cleared.
+
+This feature should preserve frictionless creation. It should let the user add shared structure after the thought stream has already begun, without requiring every Entry to be manually assigned later.
+
+Design notes:
+
+- The Category context belongs to the specific window or View, not necessarily the entire Library.
+- Applying a Category context should be visible and reversible.
+- The user should be able to understand which Entries were affected retroactively.
+- Future inherited assignments should preserve provenance, such as `view_context` or `window_context`.
+- Shortcut choice is not final. `Command-L` is memorable for List, but may conflict with common platform conventions.
+
+## Open Question: Latest Entry Placement
+
+The first prototype currently treats the Entry stream like a chronological writing surface, with newer Entries appearing lower in the scroll flow and the window scrolling to the latest Entry.
+
+This should remain open for design testing. There are two plausible models:
+
+- newest Entry at the bottom, matching chat/log/journal expectations
+- newest Entry at the top, reducing the need to scroll down after opening a window
+
+The bottom model may feel familiar because the user writes forward through time and scrolls back to earlier Entries. The top model may be more efficient because the latest Entry is immediately visible when the window opens.
+
+A third option is to keep newest-at-bottom ordering but always open a window directly at the latest Entry. That may preserve chronological expectations while avoiding extra work.
+
+No final decision yet. The core requirement is that opening a window should not make the user hunt for the current Entry.

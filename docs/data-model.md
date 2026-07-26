@@ -13,8 +13,9 @@ The first model should provide:
 - creation, modification, capture, and deletion timestamps
 - free-form Entry bodies
 - extracted Items inside Entries
+- flexible Attributes on Items
 - flexible Categories
-- Assignments between Entries, Items, and Categories
+- Assignments between Entries, Items, Attributes, and Categories
 - saved Views as live lenses over Entries
 - deterministic Rules for suggestions and auto-assignment
 - a Change Log suitable for future sync
@@ -24,17 +25,26 @@ Version 1 is local-only, but destructive deletion, unstable identifiers, and sch
 ## Entity Overview
 
 ```text
+Library
+  local information boundary and database containing the user's Structure data
+
 Entry
   user-authored unit of information
 
 Item
   detected or extracted unit inside an Entry
 
+Attribute
+  typed property of an Item, either a stable Type or changeable State
+
 Category
   organizing concept that can behave like a tag, field, value, or hierarchy node
 
 Assignment
-  relationship connecting an Entry or Item to a Category
+  general relationship family for Category and Attribute connections
+
+ItemAttributeAssignment
+  relationship connecting an Item to a Type or State Attribute
 
 View
   saved live lens over Entries
@@ -45,6 +55,30 @@ Rule
 ChangeLogEntry
   durable record of local mutations for undo, audit, and future sync
 ```
+
+## Library
+
+A Library is the local information boundary for Structure. The default product assumption is one Library per user.
+
+In v1, the Library is represented by one local SQLite database. Windows are views or workspaces into that Library, not separate Libraries.
+
+Fields, future-facing:
+
+```text
+id
+name nullable
+created_at
+updated_at
+deleted_at nullable
+```
+
+Notes:
+
+- The first prototype can use an implicit default Library and does not need a Library table.
+- Multiple Libraries may be added later for hard boundaries such as work, personal life, games, clients, archives, or import scratchpads.
+- Separate Libraries should have separate databases, encryption boundaries, sync identities, and search indexes.
+- Cross-Library search or correlation should not happen by default.
+- Opening a new window should not create a new Library. On macOS, `Command-N` should open a new Window or View into the current Library, while `Command-E` should create a new Entry in the frontmost Window or View.
 
 ## Entry
 
@@ -129,6 +163,91 @@ Notes:
 - `normalized_value` allows dates, numbers, URLs, or identifiers to be queried consistently.
 - Items may be regenerated when Entry text changes, but user-confirmed structure should not be silently lost.
 
+## Attribute
+
+An Attribute is a property that can be assigned to an Item. Most Items can have an arbitrary number of Attributes. Some Items may have no Attributes. All Items begin with no Attributes when first entered or detected; Attributes are assigned later through user action, inference, rules, or review.
+
+An Attribute is either a Type or a State.
+
+A Type is a stable classification that is not expected to change once correctly assigned. An Item may have multiple Types. Examples:
+
+```text
+Apple -> Type: Fruit
+Person -> Type: Family
+Person -> Type: Customer
+Date -> Type: Mark's Birthday
+Date -> Type: Holiday
+```
+
+A State is a changeable condition. An Item may have one or more States, and those States may change over time. Examples:
+
+```text
+Apple -> State: Fresh or Spoiled
+Person -> State: Alive or Dead
+Date -> State: Past, Present, or Pending
+Purchase -> State: Wanted or Purchased
+```
+
+The distinction matters because Type history and State history behave differently. If Apple is assigned Type Fruit, that should remain true unless the assignment was mistaken. If Apple is assigned State Fresh, that may later become Spoiled without implying the earlier Fresh state was a mistake.
+
+Fields:
+
+```text
+id
+name
+kind
+created_at
+updated_at
+deleted_at nullable
+```
+
+Possible `kind` values:
+
+```text
+type
+state
+```
+
+An ItemAttributeAssignment connects an Item to an Attribute. For State Attributes, the assignment may need effective dates or historical records so Structure can represent changes over time.
+
+## ItemAttributeAssignment
+
+An ItemAttributeAssignment connects an Item to an Attribute.
+
+Fields:
+
+```text
+id
+item_id
+attribute_id
+state
+source
+confidence nullable
+reason nullable
+effective_at nullable
+ended_at nullable
+created_at
+updated_at
+deleted_at nullable
+```
+
+Possible `state` values:
+
+```text
+explicit
+inferred
+suggested
+rejected
+```
+
+Notes:
+
+- Type Attribute assignments are expected to remain true unless corrected.
+- State Attribute assignments may change over time.
+- A State change should usually end or supersede an earlier State assignment rather than erase it.
+- `effective_at` and `ended_at` allow Structure to later distinguish current state from historical state.
+- New Items begin with no ItemAttributeAssignments.
+
 ## Category
 
 A Category is an organizing concept.
@@ -192,9 +311,9 @@ phrase
 pattern
 ```
 
-## Assignment
+## Category Assignment
 
-An Assignment connects an Entry or Item to a Category.
+A Category Assignment connects an Entry or Item to a Category.
 
 Fields:
 
@@ -229,13 +348,14 @@ alias_match
 rule
 parser
 view_context
+window_context
 import
 system
 ```
 
 Notes:
 
-- An Assignment may target an Entry directly or target an Item inside an Entry.
+- A Category Assignment may target an Entry directly or target an Item inside an Entry.
 - User decisions should be preserved. If the user rejects a suggestion, Structure should avoid repeatedly making the same suggestion without a new reason.
 - `reason` should support concise explanations such as `matched alias Fred` or `parsed date next Tuesday`.
 
@@ -364,3 +484,32 @@ The model should assume:
 - Should Category hierarchy allow multiple parents later?
 - How should view-implied Assignments be represented so the user can understand and undo them?
 - What is the minimum useful query syntax for the first prototype?
+
+## Storage Location Open Question
+
+The prototype currently stores its local SQLite database in the platform-standard macOS application data location:
+
+```text
+~/Library/Application Support/Structure/Structure.sqlite
+```
+
+A more user-visible location may also be appropriate because a Structure Library is user-owned personal data, not merely an app cache. One possible macOS development location is:
+
+```text
+~/Documents/Structure/Structure.sqlite
+```
+
+This decision should remain open for now. Before changing the default, Structure should consider whether Library storage should follow each platform's standard app-data/user-data convention or use a more uniform cross-platform visible folder convention.
+
+Factors to consider:
+
+- user ownership and discoverability
+- backup behavior
+- iCloud/OneDrive/Dropbox interactions
+- platform sandbox rules
+- mobile storage restrictions
+- encryption and sync boundaries
+- whether a Library should appear as a user-facing package/folder
+- avoiding visible implementation clutter such as SQLite WAL sidecar files
+
+No final decision yet. The first prototype may continue using Application Support until the Library packaging model is clearer.
