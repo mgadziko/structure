@@ -379,6 +379,8 @@ Notes:
 - `view_definition` can begin as structured JSON.
 - Views may filter, group, sort, and display Entries according to Categories, Assignments, text search, dates, computed predicates, or rule output.
 - Editing within a View may create view-implied Assignments.
+- A View may begin with a single `Entry` column and later gain user-created columns from the heading bar.
+- User-created columns may correspond to Categories, Attributes, computed values, or parser-backed fields such as dates.
 
 Example view definition, conceptual only:
 

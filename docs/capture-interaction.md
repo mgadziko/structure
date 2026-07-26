@@ -159,3 +159,36 @@ The bottom model may feel familiar because the user writes forward through time 
 A third option is to keep newest-at-bottom ordering but always open a window directly at the latest Entry. That may preserve chronological expectations while avoiding extra work.
 
 No final decision yet. The core requirement is that opening a window should not make the user hunt for the current Entry.
+
+## Future: Add Column From Heading Bar
+
+Deferred feature, not part of the first prototype.
+
+A simple Library or View window may begin with one visible column heading:
+
+```text
+Entry
+```
+
+When the user is working in a window and realizes that the current Entries share a useful characteristic, the user should be able to add structure directly from the heading bar without opening a schema editor.
+
+Example workflow:
+
+1. The window shows a single `Entry` column.
+2. The user clicks in the heading bar to the left or right of the `Entry` heading.
+3. Structure creates a new column heading editor in place.
+4. The user types `Date`.
+5. The window now shows two columns: `Entry` and `Date`.
+6. The `Date` cells are blank unless Structure can parse dates from existing Entry text or the user fills them in.
+
+This should feel like adding structure to the current View, not like defining a database table before capture. The user should be able to create the column at the moment the need becomes obvious.
+
+Design notes:
+
+- The initial capture View may have only the `Entry` column.
+- Adding a column should preserve existing Entries.
+- The new column name may correspond to a Category, Attribute, computed value, or parser-backed field.
+- Parser-backed columns, such as `Date`, may auto-populate from Entry text when confidence is high enough.
+- Blank cells are acceptable and should not imply incomplete or invalid Entries.
+- The interaction should allow immediate naming and then immediate use.
+- Column creation should be reversible.
