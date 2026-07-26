@@ -5,27 +5,30 @@ struct EntryStreamView: View {
     @FocusState private var focusedEntryID: Entry.ID?
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 22) {
-                    ForEach(model.entries) { entry in
-                        EntryEditor(
-                            entry: entry,
-                            text: binding(for: entry.id),
-                            focusedEntryID: $focusedEntryID
-                        )
-                        .id(entry.id)
+        VStack(alignment: .leading, spacing: 0) {
+            EntryColumnHeader()
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 22) {
+                        ForEach(model.entries) { entry in
+                            EntryEditor(
+                                entry: entry,
+                                text: binding(for: entry.id),
+                                focusedEntryID: $focusedEntryID
+                            )
+                            .id(entry.id)
+                        }
                     }
+                    .padding(.horizontal, 38)
+                    .padding(.vertical, 24)
                 }
-                .padding(.horizontal, 38)
-                .padding(.vertical, 32)
-            }
-            .background(Color(nsColor: .textBackgroundColor))
-            .onAppear {
-                focusCurrentEntry(proxy: proxy, animated: false)
-            }
-            .onChange(of: model.currentEntryID) { id in
-                focusCurrentEntry(proxy: proxy, animated: id != nil)
+                .background(Color(nsColor: .textBackgroundColor))
+                .onAppear {
+                    focusCurrentEntry(proxy: proxy, animated: false)
+                }
+                .onChange(of: model.currentEntryID) { id in
+                    focusCurrentEntry(proxy: proxy, animated: id != nil)
+                }
             }
         }
         .overlay(alignment: .bottomLeading) {
