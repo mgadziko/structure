@@ -164,21 +164,24 @@ No final decision yet. The core requirement is that opening a window should not 
 
 Deferred feature, not part of the first prototype.
 
-A simple Library or View window may begin with one visible column heading:
+A simple Library or View window may begin with two visible column headings:
 
 ```text
+Created
 Entry
 ```
+
+`Created` is automatic metadata, not a decision the user makes during capture. It should appear as column 1 for now. `Entry` should appear as column 2 and remain the user's main writing surface.
 
 When the user is working in a window and realizes that the current Entries share a useful characteristic, the user should be able to add structure directly from the heading bar without opening a schema editor.
 
 Example workflow:
 
-1. The window shows a single `Entry` column.
+1. The window shows `Created` and `Entry` columns.
 2. The user clicks in the heading bar to the left or right of the `Entry` heading.
 3. Structure creates a new column heading editor in place.
 4. The user types `Date`.
-5. The window now shows two columns: `Entry` and `Date`.
+5. The window now shows three columns: `Created`, `Entry`, and `Date`.
 6. The `Date` cells are blank unless Structure can parse dates from existing Entry text or the user fills them in.
 
 This should feel like adding structure to the current View, not like defining a database table before capture. The user should be able to create the column at the moment the need becomes obvious.
@@ -187,7 +190,15 @@ New columns should initially have no required definition. A column may later bec
 
 Design notes:
 
-- The initial capture View may have only the `Entry` column.
+- The View may include a minimal formatting bar above the column headings.
+- Formatting commands should affect the selected text in the current Entry only.
+- New Entries should always begin unformatted, even if the previous Entry ended with active list or text styling.
+- Basic formatting controls may include font size, typeface, bold, italics, underline, strikethrough, bullet list, and numbered list.
+- `Command-A` should first select all text in the current Entry. A second `Command-A` within a short interval should select all Entry text in the current column.
+- The initial capture View should have `Created` and `Entry` columns.
+- Column headings should be visually distinct from Entry content. Blue headings are acceptable for the prototype.
+- Clicking a heading should sort by that column in ascending order by default. A second click should sort descending.
+- Entry text sorting should use natural numeric-aware ordering before ordinary alphabetical ordering.
 - Adding a column should preserve existing Entries.
 - The new column should default to no definition rather than immediately becoming a Category or Attribute.
 - The new column name may later correspond to a Category, Attribute, computed value, or parser-backed field.

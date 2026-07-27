@@ -6,14 +6,19 @@ struct EntryStreamView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            EntryColumnHeader()
+            FormattingBar()
+            EntryColumnHeader(
+                sort: model.sort,
+                sortBy: model.sortBy
+            )
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
-                        ForEach(model.entries) { entry in
+                    VStack(alignment: .leading, spacing: 22) {
+                        ForEach(model.sortedEntries) { entry in
                             EntryEditor(
                                 entry: entry,
                                 text: binding(for: entry.id),
+                                richTextData: richTextBinding(for: entry.id),
                                 focusedEntryID: $focusedEntryID
                             )
                             .id(entry.id)
@@ -46,7 +51,20 @@ struct EntryStreamView: View {
     private func binding(for id: Entry.ID) -> Binding<String> {
         Binding(
             get: { model.entries.first(where: { $0.id == id })?.body ?? "" },
-            set: { model.updateBody(for: id, body: $0) }
+            set: { body in
+                let richTextData = model.entries.first(where: { $0.id == id })?.richTextData
+                model.updateRichText(for: id, body: body, richTextData: richTextData)
+            }
+        )
+    }
+
+    private func richTextBinding(for id: Entry.ID) -> Binding<Data?> {
+        Binding(
+            get: { model.entries.first(where: { $0.id == id })?.richTextData },
+            set: { richTextData in
+                let body = model.entries.first(where: { $0.id == id })?.body ?? ""
+                model.updateRichText(for: id, body: body, richTextData: richTextData)
+            }
         )
     }
 

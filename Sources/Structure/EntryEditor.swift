@@ -3,20 +3,33 @@ import SwiftUI
 struct EntryEditor: View {
     let entry: Entry
     @Binding var text: String
+    @Binding var richTextData: Data?
     var focusedEntryID: FocusState<Entry.ID?>.Binding
+    @State private var editorHeight: CGFloat = 22
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .top, spacing: 18) {
             Text(entry.displayDate)
-                .font(.caption)
+                .font(.system(size: 12, weight: .regular))
                 .foregroundStyle(.secondary)
-            TextEditor(text: $text)
-                .font(.system(size: 17, weight: .regular, design: .serif))
-                .focused(focusedEntryID, equals: entry.id)
-                .scrollContentBackground(.hidden)
-                .frame(minHeight: 96)
-                .padding(.horizontal, -5)
-                .accessibilityLabel("Entry created \(entry.displayDate)")
+                .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
+                .padding(.top, 8)
+
+            VStack(alignment: .leading, spacing: 5) {
+                RichTextEntryEditor(
+                    entryID: entry.id,
+                    body: $text,
+                    richTextData: $richTextData,
+                    height: $editorHeight,
+                    focusedEntryID: focusedEntryID
+                )
+                    .frame(height: editorHeight)
+                    .accessibilityLabel("Entry created \(entry.displayDate)")
+            }
         }
     }
+}
+
+enum EntryRowLayout {
+    static let createdColumnWidth: CGFloat = 150
 }

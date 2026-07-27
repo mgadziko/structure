@@ -6,12 +6,18 @@ APP="$ROOT/dist/Structure.app"
 CONTENTS="$APP/Contents"
 MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
+ICONSET="$ROOT/Resources/StructureIcon.iconset"
+ICON="$ROOT/Resources/StructureIcon.icns"
 
 swift build -c release --package-path "$ROOT"
+
+swift "$ROOT/scripts/generate-app-icon.swift" "$ROOT"
+iconutil -c icns "$ICONSET" -o "$ICON"
 
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$ROOT/.build/release/Structure" "$MACOS/Structure"
+cp "$ICON" "$RESOURCES/StructureIcon.icns"
 
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,6 +32,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <string>Structure</string>
     <key>CFBundleDisplayName</key>
     <string>Structure</string>
+    <key>CFBundleIconFile</key>
+    <string>StructureIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
