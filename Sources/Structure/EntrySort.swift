@@ -1,8 +1,9 @@
 import Foundation
 
-enum EntrySortColumn {
+enum EntrySortColumn: Equatable {
     case created
     case body
+    case userColumn(String)
 }
 
 enum EntrySortDirection {

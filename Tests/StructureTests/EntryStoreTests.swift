@@ -42,11 +42,60 @@ final class EntryStoreTests: XCTestCase {
             id: "column-1",
             title: "Attribute",
             placement: .afterEntry,
-            orderIndex: 3
+            orderIndex: 3,
+            width: 180
         )
 
         try store.insertColumn(column, createdAt: Date(timeIntervalSince1970: 10))
 
+        XCTAssertEqual(try store.loadColumns(), [column])
+    }
+
+    func testColumnOrderUpdatesRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let first = EntryColumn(
+            id: "column-1",
+            title: "First",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 120
+        )
+        let second = EntryColumn(
+            id: "column-2",
+            title: "Second",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 160
+        )
+
+        try store.insertColumn(first, createdAt: timestamp)
+        try store.insertColumn(second, createdAt: timestamp)
+
+        var reorderedSecond = second
+        reorderedSecond.orderIndex = 0
+        var reorderedFirst = first
+        reorderedFirst.orderIndex = 1
+        try store.updateColumnOrder([reorderedSecond, reorderedFirst], updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadColumns(), [reorderedSecond, reorderedFirst])
+    }
+
+    func testColumnWidthUpdatesRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        var column = EntryColumn(
+            id: "column-1",
+            title: "Resizable",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 120
+        )
+
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.updateColumnWidth(columnID: column.id, width: 240, updatedAt: timestamp)
+
+        column.width = 240
         XCTAssertEqual(try store.loadColumns(), [column])
     }
 
@@ -66,7 +115,8 @@ final class EntryStoreTests: XCTestCase {
             id: "column-1",
             title: "Attribute",
             placement: .afterEntry,
-            orderIndex: 0
+            orderIndex: 0,
+            width: 120
         )
 
         try store.insert(entry)

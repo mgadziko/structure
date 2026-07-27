@@ -111,7 +111,7 @@ final class EntryStore {
 
     func loadColumns() throws -> [EntryColumn] {
         let sql = """
-        SELECT id, title, placement, order_index
+        SELECT id, title, placement, order_index, width
         FROM entry_columns
         WHERE deleted_at IS NULL
         ORDER BY order_index ASC, created_at ASC;
@@ -132,7 +132,8 @@ final class EntryStore {
                 id: String(cString: idText),
                 title: String(cString: titleText),
                 placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
-                orderIndex: Int(sqlite3_column_int(statement, 3))
+                orderIndex: Int(sqlite3_column_int(statement, 3)),
+                width: sqlite3_column_double(statement, 4)
             ))
         }
 
@@ -141,8 +142,8 @@ final class EntryStore {
 
     func insertColumn(_ column: EntryColumn, createdAt: Date = Date()) throws {
         let sql = """
-        INSERT INTO entry_columns (id, title, placement, order_index, created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, NULL);
+        INSERT INTO entry_columns (id, title, placement, order_index, width, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL);
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
@@ -152,10 +153,48 @@ final class EntryStore {
         sqlite3_bind_text(statement, 2, column.title, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 3, column.placement.rawValue, -1, SQLITE_TRANSIENT)
         sqlite3_bind_int(statement, 4, Int32(column.orderIndex))
-        sqlite3_bind_double(statement, 5, createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 5, column.width)
         sqlite3_bind_double(statement, 6, createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, createdAt.timeIntervalSince1970)
 
         try step(statement)
+    }
+
+    func updateColumnWidth(columnID: EntryColumn.ID, width: Double, updatedAt: Date = Date()) throws {
+        let sql = """
+        UPDATE entry_columns
+        SET width = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, width)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, columnID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    func updateColumnOrder(_ columns: [EntryColumn], updatedAt: Date = Date()) throws {
+        let sql = """
+        UPDATE entry_columns
+        SET placement = ?, order_index = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        for column in columns {
+            var statement: OpaquePointer?
+            try prepare(sql, statement: &statement)
+            defer { sqlite3_finalize(statement) }
+
+            sqlite3_bind_text(statement, 1, column.placement.rawValue, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int(statement, 2, Int32(column.orderIndex))
+            sqlite3_bind_double(statement, 3, updatedAt.timeIntervalSince1970)
+            sqlite3_bind_text(statement, 4, column.id, -1, SQLITE_TRANSIENT)
+
+            try step(statement)
+        }
     }
 
     func loadColumnValues() throws -> [EntryColumnValueKey: String] {
@@ -238,11 +277,15 @@ final class EntryStore {
             title TEXT NOT NULL,
             placement TEXT NOT NULL,
             order_index INTEGER NOT NULL,
+            width REAL NOT NULL DEFAULT 120,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             deleted_at REAL
         );
         """)
+        if try !columnExists("width", in: "entry_columns") {
+            try execute("ALTER TABLE entry_columns ADD COLUMN width REAL NOT NULL DEFAULT 120;")
+        }
         try execute("""
         CREATE INDEX IF NOT EXISTS idx_entry_columns_order
         ON entry_columns (deleted_at, order_index, created_at);

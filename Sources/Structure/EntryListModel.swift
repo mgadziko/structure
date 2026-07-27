@@ -8,6 +8,7 @@ final class EntryListModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var sort = EntrySort()
     @Published var columns: [EntryColumn] = []
+    @Published var visibilityRequest: EntryVisibilityRequest?
     @Published private var columnValues: [EntryColumnValueKey: String] = [:]
 
     private let store: EntryStore
@@ -71,6 +72,8 @@ final class EntryListModel: ObservableObject {
                 comparison = compareDates(lhs.createdAt, rhs.createdAt)
             case .body:
                 comparison = compareEntryBodies(lhs, rhs)
+            case .userColumn(let columnID):
+                comparison = compareColumnValues(columnID: columnID, lhs: lhs, rhs: rhs)
             }
 
             switch sort.direction {
@@ -93,10 +96,30 @@ final class EntryListModel: ObservableObject {
             id: UUID().uuidString,
             title: trimmedTitle,
             placement: placement,
-            orderIndex: columns.count
+            orderIndex: columns.count,
+            width: EntryRowLayout.defaultUndefinedColumnWidth
         )
         columns.append(column)
         persistColumn(column)
+    }
+
+    func moveColumn(draggedColumnID: EntryColumn.ID, targetColumnID: EntryColumn.ID) {
+        guard
+            draggedColumnID != targetColumnID,
+            let sourceIndex = columns.firstIndex(where: { $0.id == draggedColumnID }),
+            let targetIndex = columns.firstIndex(where: { $0.id == targetColumnID })
+        else { return }
+
+        let targetPlacement = columns[targetIndex].placement
+        var movedColumn = columns.remove(at: sourceIndex)
+        movedColumn.placement = targetPlacement
+        let adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+        columns.insert(movedColumn, at: adjustedTargetIndex)
+
+        for index in columns.indices {
+            columns[index].orderIndex = index
+        }
+        persistColumnOrder()
     }
 
     var columnsBeforeEntry: [EntryColumn] {
@@ -107,15 +130,32 @@ final class EntryListModel: ObservableObject {
         columns.filter { $0.placement == .afterEntry }
     }
 
-    func columnValueBinding(entryID: Entry.ID, columnID: EntryColumn.ID) -> Binding<String> {
+    func columnValue(entryID: Entry.ID, columnID: EntryColumn.ID) -> String {
+        columnValues[EntryColumnValueKey(entryID: entryID, columnID: columnID)] ?? ""
+    }
+
+    func updateColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: String) {
         let key = EntryColumnValueKey(entryID: entryID, columnID: columnID)
-        return Binding(
-            get: { self.columnValues[key] ?? "" },
-            set: { value in
-                self.columnValues[key] = value
-                self.persistColumnValue(entryID: entryID, columnID: columnID, value: value)
-            }
-        )
+        guard columnValues[key] != value else { return }
+        columnValues[key] = value
+        persistColumnValue(entryID: entryID, columnID: columnID, value: value)
+        visibilityRequest = EntryVisibilityRequest(entryID: entryID)
+    }
+
+    func saveColumnValueDraft(entryID: Entry.ID, columnID: EntryColumn.ID, value: String) {
+        persistColumnValue(entryID: entryID, columnID: columnID, value: value)
+    }
+
+    func requestEntryVisibility(entryID: Entry.ID) {
+        visibilityRequest = EntryVisibilityRequest(entryID: entryID)
+    }
+
+    func resizeColumn(columnID: EntryColumn.ID, width: Double) {
+        guard let index = columns.firstIndex(where: { $0.id == columnID }) else { return }
+        let clampedWidth = min(max(width, EntryRowLayout.minimumUndefinedColumnWidth), EntryRowLayout.maximumUndefinedColumnWidth)
+        guard abs(columns[index].width - clampedWidth) > 0.5 else { return }
+        columns[index].width = clampedWidth
+        persistColumnWidth(columnID: columnID, width: clampedWidth)
     }
 
     private func compareDates(_ lhs: Date, _ rhs: Date) -> ComparisonResult {
@@ -132,6 +172,22 @@ final class EntryListModel: ObservableObject {
         let bodyComparison = lhs.body.localizedStandardCompare(rhs.body)
         if bodyComparison != .orderedSame {
             return bodyComparison
+        }
+
+        let dateComparison = compareDates(lhs.createdAt, rhs.createdAt)
+        if dateComparison != .orderedSame {
+            return dateComparison
+        }
+
+        return lhs.id.localizedStandardCompare(rhs.id)
+    }
+
+    private func compareColumnValues(columnID: EntryColumn.ID, lhs: Entry, rhs: Entry) -> ComparisonResult {
+        let lhsValue = columnValues[EntryColumnValueKey(entryID: lhs.id, columnID: columnID)] ?? ""
+        let rhsValue = columnValues[EntryColumnValueKey(entryID: rhs.id, columnID: columnID)] ?? ""
+        let valueComparison = lhsValue.localizedStandardCompare(rhsValue)
+        if valueComparison != .orderedSame {
+            return valueComparison
         }
 
         let dateComparison = compareDates(lhs.createdAt, rhs.createdAt)
@@ -177,4 +233,27 @@ final class EntryListModel: ObservableObject {
             errorMessage = String(describing: error)
         }
     }
+
+    private func persistColumnOrder() {
+        do {
+            try store.updateColumnOrder(columns)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func persistColumnWidth(columnID: EntryColumn.ID, width: Double) {
+        do {
+            try store.updateColumnWidth(columnID: columnID, width: width)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+}
+
+struct EntryVisibilityRequest: Equatable {
+    let id = UUID()
+    let entryID: Entry.ID
 }

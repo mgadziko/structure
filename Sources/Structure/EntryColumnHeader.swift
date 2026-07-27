@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct EntryColumnHeader: View {
     let sort: EntrySort
@@ -6,8 +8,11 @@ struct EntryColumnHeader: View {
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
     let addColumn: (String, EntryColumnPlacement) -> Void
+    let moveColumn: (EntryColumn.ID, EntryColumn.ID) -> Void
+    let resizeColumn: (EntryColumn.ID, Double) -> Void
     @State private var draftColumnPlacement: EntryColumnPlacement?
     @State private var draftColumnTitle = ""
+    @State private var draggedColumnID: EntryColumn.ID?
     @FocusState private var draftIsFocused: Bool
 
     var body: some View {
@@ -21,7 +26,14 @@ struct EntryColumnHeader: View {
             .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
 
             ForEach(columnsBeforeEntry) { column in
-                UndefinedColumnHeader(title: column.title)
+                UndefinedColumnHeader(
+                    column: column,
+                    sort: sort,
+                    action: sortBy,
+                    draggedColumnID: $draggedColumnID,
+                    moveColumn: moveColumn,
+                    resizeColumn: resizeColumn
+                )
             }
 
             columnCreationControl(for: .beforeEntry)
@@ -37,10 +49,18 @@ struct EntryColumnHeader: View {
             columnCreationControl(for: .afterEntry)
 
             ForEach(columnsAfterEntry) { column in
-                UndefinedColumnHeader(title: column.title)
+                UndefinedColumnHeader(
+                    column: column,
+                    sort: sort,
+                    action: sortBy,
+                    draggedColumnID: $draggedColumnID,
+                    moveColumn: moveColumn,
+                    resizeColumn: resizeColumn
+                )
             }
             Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, EntryRowLayout.horizontalPadding)
         .padding(.top, 20)
         .padding(.bottom, 8)
@@ -54,7 +74,7 @@ struct EntryColumnHeader: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.blue)
-                .frame(width: EntryRowLayout.undefinedColumnWidth, alignment: .leading)
+                .frame(width: EntryRowLayout.defaultUndefinedColumnWidth, alignment: .leading)
                 .focused($draftIsFocused)
                 .onSubmit {
                     commitDraftColumn()
@@ -69,7 +89,7 @@ struct EntryColumnHeader: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
-                    .frame(width: 18, height: 18)
+                    .frame(width: EntryRowLayout.columnCreationControlWidth, height: 18)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -87,14 +107,117 @@ struct EntryColumnHeader: View {
 }
 
 private struct UndefinedColumnHeader: View {
-    let title: String
+    let column: EntryColumn
+    let sort: EntrySort
+    let action: (EntrySortColumn) -> Void
+    @Binding var draggedColumnID: EntryColumn.ID?
+    let moveColumn: (EntryColumn.ID, EntryColumn.ID) -> Void
+    let resizeColumn: (EntryColumn.ID, Double) -> Void
+    @State private var dragStartWidth: Double?
+    @State private var previewWidth: Double?
+
+    private var displayWidth: Double {
+        previewWidth ?? column.width
+    }
 
     var body: some View {
-        Text(title)
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(.blue)
-            .frame(width: EntryRowLayout.undefinedColumnWidth, alignment: .leading)
-            .help("Undefined column")
+        HStack(spacing: 0) {
+            SortHeaderButton(
+                title: column.title,
+                column: .userColumn(column.id),
+                sort: sort,
+                action: action
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            ZStack {
+                Color.clear
+                    .frame(width: 20, height: 26)
+
+                Rectangle()
+                    .fill(Color(nsColor: .separatorColor).opacity(0.9))
+                    .frame(width: 3, height: 18)
+            }
+                .resizeCursor()
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { value in
+                            let baseWidth = dragStartWidth ?? column.width
+                            dragStartWidth = baseWidth
+                            previewWidth = clampedColumnWidth(baseWidth + value.translation.width)
+                        }
+                        .onEnded { value in
+                            let baseWidth = dragStartWidth ?? column.width
+                            resizeColumn(column.id, baseWidth + value.translation.width)
+                            previewWidth = nil
+                            dragStartWidth = nil
+                        }
+                )
+                .help("Drag to resize column")
+        }
+        .frame(width: displayWidth, alignment: .leading)
+        .contentShape(Rectangle())
+        .onDrag {
+            draggedColumnID = column.id
+            return NSItemProvider(object: column.id as NSString)
+        }
+        .onDrop(
+            of: [UTType.text],
+            delegate: EntryColumnDropDelegate(
+                targetColumnID: column.id,
+                draggedColumnID: $draggedColumnID,
+                moveColumn: moveColumn
+            )
+        )
+        .help("Drag heading to rearrange; drag right edge to resize")
+    }
+}
+
+private func clampedColumnWidth(_ width: Double) -> Double {
+    min(max(width, EntryRowLayout.minimumUndefinedColumnWidth), EntryRowLayout.maximumUndefinedColumnWidth)
+}
+
+private struct ResizeCursorModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background(ResizeCursorView())
+    }
+}
+
+private extension View {
+    func resizeCursor() -> some View {
+        modifier(ResizeCursorModifier())
+    }
+}
+
+private struct ResizeCursorView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        ResizeCursorNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+private final class ResizeCursorNSView: NSView {
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+}
+
+private struct EntryColumnDropDelegate: DropDelegate {
+    let targetColumnID: EntryColumn.ID
+    @Binding var draggedColumnID: EntryColumn.ID?
+    let moveColumn: (EntryColumn.ID, EntryColumn.ID) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedColumnID, draggedColumnID != targetColumnID else { return }
+        moveColumn(draggedColumnID, targetColumnID)
+        self.draggedColumnID = targetColumnID
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedColumnID = nil
+        return true
     }
 }
 

@@ -28,6 +28,7 @@ struct EntryColumn: Identifiable, Equatable {
     var title: String
     var placement: EntryColumnPlacement
     var orderIndex: Int
+    var width: Double
 }
 
 struct EntryColumnValueKey: Hashable {

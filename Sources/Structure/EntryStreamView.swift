@@ -12,7 +12,9 @@ struct EntryStreamView: View {
                 sortBy: model.sortBy,
                 columnsBeforeEntry: model.columnsBeforeEntry,
                 columnsAfterEntry: model.columnsAfterEntry,
-                addColumn: model.addColumn
+                addColumn: model.addColumn,
+                moveColumn: model.moveColumn,
+                resizeColumn: model.resizeColumn
             )
             ScrollViewReader { proxy in
                 ScrollView {
@@ -24,15 +26,20 @@ struct EntryStreamView: View {
                                 richTextData: richTextBinding(for: entry.id),
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
-                                columnValueBinding: model.columnValueBinding,
+                                columnValue: model.columnValue,
+                                saveColumnValueDraft: model.saveColumnValueDraft,
+                                updateColumnValue: model.updateColumnValue,
+                                requestEntryVisibility: model.requestEntryVisibility,
                                 focusedEntryID: $focusedEntryID
                             )
                             .id(entry.id)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, EntryRowLayout.horizontalPadding)
                     .padding(.vertical, 24)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .background(Color(nsColor: .textBackgroundColor))
                 .onAppear {
                     focusCurrentEntry(proxy: proxy, animated: false)
@@ -40,8 +47,13 @@ struct EntryStreamView: View {
                 .onChange(of: model.currentEntryID) { id in
                     focusCurrentEntry(proxy: proxy, animated: id != nil)
                 }
+                .onChange(of: model.visibilityRequest) { request in
+                    keepEntryVisible(request, proxy: proxy)
+                }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(Color(nsColor: .textBackgroundColor))
         .overlay(alignment: .bottomLeading) {
             if let errorMessage = model.errorMessage {
                 Text(errorMessage)
@@ -85,6 +97,15 @@ struct EntryStreamView: View {
                 proxy.scrollTo(id, anchor: .bottom)
             }
             focusedEntryID = id
+        }
+    }
+
+    private func keepEntryVisible(_ request: EntryVisibilityRequest?, proxy: ScrollViewProxy) {
+        guard let request else { return }
+        DispatchQueue.main.async {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(request.entryID, anchor: .center)
+            }
         }
     }
 }

@@ -199,9 +199,12 @@ Design notes:
 - Prototype add-column controls may appear as small blue add targets next to the `Entry` heading.
 - Undefined columns should display visible editable cells so the user understands where column values can be entered.
 - Prototype undefined-column cell values may be session-only until View/column persistence is implemented.
+- User-created column headings should be draggable left and right for on-the-fly rearrangement. `Created` and `Entry` remain fixed in the prototype.
 - Column headings should be visually distinct from Entry content. Blue headings are acceptable for the prototype.
 - Clicking a heading should sort by that column in ascending order by default. A second click should sort descending.
 - Entry text sorting should use natural numeric-aware ordering before ordinary alphabetical ordering.
+- A sorted column must not reorder rows while the user is actively typing or editing a cell. Commit cell edits after editing ends and keep the edited Entry visible if sorting moves it.
+- Undefined-column cells should wrap and grow vertically instead of remaining one-line fields.
 - Adding a column should preserve existing Entries.
 - The new column should default to no definition rather than immediately becoming a Category or Attribute.
 - The new column name may later correspond to a Category, Attribute, computed value, or parser-backed field.
