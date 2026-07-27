@@ -60,9 +60,6 @@ struct EntryStreamView: View {
                 .onChange(of: model.currentEntryID) { id in
                     focusCurrentEntry(proxy: proxy, animated: id != nil)
                 }
-                .onChange(of: model.visibilityRequest) { request in
-                    keepEntryVisible(request, proxy: proxy)
-                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -110,15 +107,6 @@ struct EntryStreamView: View {
                 proxy.scrollTo(id, anchor: .bottom)
             }
             focusedEntryID = id
-        }
-    }
-
-    private func keepEntryVisible(_ request: EntryVisibilityRequest?, proxy: ScrollViewProxy) {
-        guard let request else { return }
-        DispatchQueue.main.async {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo(request.entryID, anchor: .center)
-            }
         }
     }
 

@@ -44,6 +44,7 @@ struct RichTextEntryEditor: NSViewRepresentable {
         context.coordinator.updateHeight()
 
         scrollView.documentView = textView
+        context.coordinator.focusIfNeeded()
         return scrollView
     }
 
@@ -51,11 +52,7 @@ struct RichTextEntryEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         context.coordinator.parent = self
 
-        if focusedEntryID.wrappedValue == entryID, textView.window?.firstResponder !== textView {
-            DispatchQueue.main.async {
-                textView.window?.makeFirstResponder(textView)
-            }
-        }
+        context.coordinator.focusIfNeeded()
 
         guard !context.coordinator.isEditing else { return }
         if textView.string != body {
@@ -75,6 +72,7 @@ struct RichTextEntryEditor: NSViewRepresentable {
         weak var textView: NSTextView?
         weak var scrollView: NSScrollView?
         var isEditing = false
+        private var pendingFocusAttempts = 0
 
         init(parent: RichTextEntryEditor) {
             self.parent = parent
@@ -92,6 +90,11 @@ struct RichTextEntryEditor: NSViewRepresentable {
             parent.onEndEditing()
         }
 
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
+        }
+
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             isEditing = true
@@ -99,6 +102,7 @@ struct RichTextEntryEditor: NSViewRepresentable {
             parent.richTextData = rtfData(from: textView)
             updateHeight()
             isEditing = false
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
         }
 
         func apply(body: String, richTextData: Data?) {
@@ -127,6 +131,31 @@ struct RichTextEntryEditor: NSViewRepresentable {
         func applyReadableTextColor() {
             guard let storage = textView?.textStorage else { return }
             normalizeReadableTextColor(in: storage)
+        }
+
+        func focusIfNeeded() {
+            guard parent.focusedEntryID.wrappedValue == parent.entryID else {
+                pendingFocusAttempts = 0
+                return
+            }
+            guard let textView else { return }
+            guard textView.window?.firstResponder !== textView else {
+                pendingFocusAttempts = 0
+                return
+            }
+
+            DispatchQueue.main.async {
+                if let window = textView.window {
+                    window.makeFirstResponder(textView)
+                    EntrySelectionCoordinator.shared.focus(textView)
+                    self.pendingFocusAttempts = 0
+                } else if self.pendingFocusAttempts < 4 {
+                    self.pendingFocusAttempts += 1
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        self.focusIfNeeded()
+                    }
+                }
+            }
         }
 
         private func rtfData(from textView: NSTextView) -> Data? {
@@ -164,14 +193,14 @@ struct RichTextEntryEditor: NSViewRepresentable {
     }
 }
 
-private func defaultTypingAttributes() -> [NSAttributedString.Key: Any] {
+func defaultTypingAttributes() -> [NSAttributedString.Key: Any] {
     [
         .font: NSFontManager.shared.convert(NSFont.systemFont(ofSize: 17), toFamily: "New York"),
         .foregroundColor: NSColor.labelColor
     ]
 }
 
-private func normalizeReadableTextColor(in attributedString: NSMutableAttributedString) {
+func normalizeReadableTextColor(in attributedString: NSMutableAttributedString) {
     let fullRange = NSRange(location: 0, length: attributedString.length)
     guard fullRange.length > 0 else { return }
     attributedString.addAttribute(.foregroundColor, value: NSColor.labelColor, range: fullRange)

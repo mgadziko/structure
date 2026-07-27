@@ -348,16 +348,16 @@ final class EntryStore {
         }
     }
 
-    func loadColumnValues() throws -> [EntryColumnValueKey: String] {
+    func loadColumnValues() throws -> [EntryColumnValueKey: EntryColumnValue] {
         let sql = """
-        SELECT entry_id, column_id, value_text
+        SELECT entry_id, column_id, value_text, value_rtf
         FROM entry_column_values;
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         defer { sqlite3_finalize(statement) }
 
-        var values: [EntryColumnValueKey: String] = [:]
+        var values: [EntryColumnValueKey: EntryColumnValue] = [:]
         while sqlite3_step(statement) == SQLITE_ROW {
             guard
                 let entryIDText = sqlite3_column_text(statement, 0),
@@ -365,21 +365,36 @@ final class EntryStore {
                 let valueText = sqlite3_column_text(statement, 2)
             else { continue }
 
+            let richTextData: Data?
+            if sqlite3_column_type(statement, 3) == SQLITE_NULL {
+                richTextData = nil
+            } else if let bytes = sqlite3_column_blob(statement, 3) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
+            } else {
+                richTextData = nil
+            }
+
             values[EntryColumnValueKey(
                 entryID: String(cString: entryIDText),
                 columnID: String(cString: columnIDText)
-            )] = String(cString: valueText)
+            )] = EntryColumnValue(text: String(cString: valueText), richTextData: richTextData)
         }
 
         return values
     }
 
-    func upsertColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: String, updatedAt: Date = Date()) throws {
+    func upsertColumnValue(
+        entryID: Entry.ID,
+        columnID: EntryColumn.ID,
+        value: EntryColumnValue,
+        updatedAt: Date = Date()
+    ) throws {
         let sql = """
-        INSERT INTO entry_column_values (entry_id, column_id, value_text, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(entry_id, column_id) DO UPDATE SET
             value_text = excluded.value_text,
+            value_rtf = excluded.value_rtf,
             updated_at = excluded.updated_at;
         """
         var statement: OpaquePointer?
@@ -388,9 +403,10 @@ final class EntryStore {
 
         sqlite3_bind_text(statement, 1, entryID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 2, columnID, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(statement, 3, value, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_double(statement, 4, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, value.text, -1, SQLITE_TRANSIENT)
+        bindRichText(value.richTextData, to: statement, at: 4)
         sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -474,6 +490,7 @@ final class EntryStore {
             entry_id TEXT NOT NULL,
             column_id TEXT NOT NULL,
             value_text TEXT NOT NULL,
+            value_rtf BLOB,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             PRIMARY KEY (entry_id, column_id),
@@ -481,6 +498,9 @@ final class EntryStore {
             FOREIGN KEY (column_id) REFERENCES entry_columns(id) ON DELETE CASCADE
         );
         """)
+        if try !columnExists("value_rtf", in: "entry_column_values") {
+            try execute("ALTER TABLE entry_column_values ADD COLUMN value_rtf BLOB;")
+        }
     }
 
     private func ensureDefaultViewExists() throws {

@@ -208,15 +208,37 @@ final class EntryStoreTests: XCTestCase {
 
         try store.insert(entry)
         try store.insertColumn(column, createdAt: timestamp)
-        try store.upsertColumnValue(entryID: entry.id, columnID: column.id, value: "example", updatedAt: timestamp)
+        let richTextData = Data("column rtf payload".utf8)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "example", richTextData: richTextData),
+            updatedAt: timestamp
+        )
 
         XCTAssertEqual(try store.loadColumnValues(), [
-            EntryColumnValueKey(entryID: entry.id, columnID: column.id): "example"
+            EntryColumnValueKey(entryID: entry.id, columnID: column.id): EntryColumnValue(text: "example", richTextData: richTextData)
         ])
 
-        try store.upsertColumnValue(entryID: entry.id, columnID: column.id, value: "updated", updatedAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "updated", richTextData: nil),
+            updatedAt: timestamp
+        )
         XCTAssertEqual(try store.loadColumnValues(), [
-            EntryColumnValueKey(entryID: entry.id, columnID: column.id): "updated"
+            EntryColumnValueKey(entryID: entry.id, columnID: column.id): EntryColumnValue(text: "updated", richTextData: nil)
+        ])
+    }
+
+    func testLegacyColumnValuesMigrateRichTextColumn() throws {
+        let databaseURL = try temporaryDatabaseURL()
+        try createLegacyColumnValueDatabase(at: databaseURL)
+
+        let store = try EntryStore(databaseURL: databaseURL)
+
+        XCTAssertEqual(try store.loadColumnValues(), [
+            EntryColumnValueKey(entryID: "entry-1", columnID: "column-1"): EntryColumnValue(text: "legacy value", richTextData: nil)
         ])
     }
 
@@ -279,6 +301,60 @@ final class EntryStoreTests: XCTestCase {
         try execute("""
         INSERT INTO entry_columns (id, title, placement, order_index, width, created_at, updated_at, deleted_at)
         VALUES ('legacy-column', 'Legacy', 'after_entry', 0, 120, 1, 1, NULL);
+        """, db: db)
+    }
+
+    private func createLegacyColumnValueDatabase(at url: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        try execute("""
+        CREATE TABLE entries (
+            id TEXT PRIMARY KEY NOT NULL,
+            body_plain_text TEXT NOT NULL,
+            body_rtf BLOB,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            captured_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """, db: db)
+        try execute("""
+        CREATE TABLE entry_columns (
+            id TEXT PRIMARY KEY NOT NULL,
+            view_id TEXT NOT NULL DEFAULT 'default',
+            title TEXT NOT NULL,
+            placement TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            width REAL NOT NULL DEFAULT 120,
+            definition_kind TEXT NOT NULL DEFAULT 'none',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """, db: db)
+        try execute("""
+        CREATE TABLE entry_column_values (
+            entry_id TEXT NOT NULL,
+            column_id TEXT NOT NULL,
+            value_text TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (entry_id, column_id)
+        );
+        """, db: db)
+        try execute("""
+        INSERT INTO entries (id, body_plain_text, body_rtf, created_at, updated_at, captured_at, deleted_at)
+        VALUES ('entry-1', 'Entry', NULL, 1, 1, 1, NULL);
+        """, db: db)
+        try execute("""
+        INSERT INTO entry_columns (id, view_id, title, placement, order_index, width, definition_kind, created_at, updated_at, deleted_at)
+        VALUES ('column-1', 'default', 'Legacy Column', 'after_entry', 0, 120, 'none', 1, 1, NULL);
+        """, db: db)
+        try execute("""
+        INSERT INTO entry_column_values (entry_id, column_id, value_text, created_at, updated_at)
+        VALUES ('entry-1', 'column-1', 'legacy value', 1, 1);
         """, db: db)
     }
 

@@ -10,21 +10,25 @@ final class EntryListModel: ObservableObject {
     @Published private(set) var activeView: StructureView?
     @Published private(set) var views: [StructureView] = []
     @Published var columns: [EntryColumn] = []
-    @Published var visibilityRequest: EntryVisibilityRequest?
-    @Published private var columnValues: [EntryColumnValueKey: String] = [:]
+    @Published private var columnValues: [EntryColumnValueKey: EntryColumnValue] = [:]
     @Published private(set) var visibleEntries: [Entry] = []
     @Published private(set) var activeLibraryURL: URL?
     @Published private(set) var allColumnNames: [String] = []
+    @Published private(set) var recentLibraryURLs: [URL] = []
 
     private var store: EntryStore?
     private var editingEntryIDs: Set<Entry.ID> = []
     private var editingColumnKeys: Set<EntryColumnValueKey> = []
 
     init() {
+        recentLibraryURLs = Self.loadRecentLibraryURLs()
         do {
-            let store = try EntryStore()
+            let databaseURL = try Self.initialLibraryURL()
+            let store = try EntryStore(databaseURL: databaseURL)
             self.store = store
-            activeLibraryURL = try EntryStore.defaultDatabaseURL
+            activeLibraryURL = databaseURL
+            Self.rememberLastOpenedLibrary(at: databaseURL)
+            recentLibraryURLs = Self.loadRecentLibraryURLs()
             try loadLibraryState(from: store, createEntryIfEmpty: true)
         } catch {
             errorMessage = "Could not initialize EntryStore: \(error)"
@@ -79,6 +83,8 @@ final class EntryListModel: ObservableObject {
             let store = try EntryStore(databaseURL: url)
             self.store = store
             activeLibraryURL = url
+            Self.rememberLastOpenedLibrary(at: url)
+            recentLibraryURLs = Self.loadRecentLibraryURLs()
             try loadLibraryState(from: store, createEntryIfEmpty: true)
             errorMessage = nil
         } catch {
@@ -94,6 +100,8 @@ final class EntryListModel: ObservableObject {
             let store = try EntryStore(databaseURL: url)
             self.store = store
             activeLibraryURL = url
+            Self.rememberLastOpenedLibrary(at: url)
+            recentLibraryURLs = Self.loadRecentLibraryURLs()
             try loadLibraryState(from: store, createEntryIfEmpty: true)
             errorMessage = nil
         } catch {
@@ -148,7 +156,6 @@ final class EntryListModel: ObservableObject {
         columns = []
         currentEntryID = nil
         visibleEntries = []
-        visibilityRequest = nil
         editingEntryIDs = []
         editingColumnKeys = []
     }
@@ -291,11 +298,11 @@ final class EntryListModel: ObservableObject {
         columns.filter { $0.placement == .afterEntry }
     }
 
-    func columnValue(entryID: Entry.ID, columnID: EntryColumn.ID) -> String {
-        columnValues[EntryColumnValueKey(entryID: entryID, columnID: columnID)] ?? ""
+    func columnValue(entryID: Entry.ID, columnID: EntryColumn.ID) -> EntryColumnValue {
+        columnValues[EntryColumnValueKey(entryID: entryID, columnID: columnID)] ?? .empty
     }
 
-    func updateColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: String) {
+    func updateColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
         let key = EntryColumnValueKey(entryID: entryID, columnID: columnID)
         guard columnValues[key] != value else { return }
         columnValues[key] = value
@@ -303,12 +310,8 @@ final class EntryListModel: ObservableObject {
         refreshVisibleEntries()
     }
 
-    func saveColumnValueDraft(entryID: Entry.ID, columnID: EntryColumn.ID, value: String) {
+    func saveColumnValueDraft(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
         persistColumnValue(entryID: entryID, columnID: columnID, value: value)
-    }
-
-    func requestEntryVisibility(entryID: Entry.ID) {
-        visibilityRequest = EntryVisibilityRequest(entryID: entryID)
     }
 
     func beginEntryEditing(entryID: Entry.ID) {
@@ -318,7 +321,6 @@ final class EntryListModel: ObservableObject {
     func endEntryEditing(entryID: Entry.ID) {
         editingEntryIDs.remove(entryID)
         refreshVisibleEntries(force: true)
-        visibilityRequest = EntryVisibilityRequest(entryID: entryID)
     }
 
     func beginColumnEditing(entryID: Entry.ID, columnID: EntryColumn.ID) {
@@ -363,8 +365,8 @@ final class EntryListModel: ObservableObject {
     }
 
     private func compareColumnValues(columnID: EntryColumn.ID, lhs: Entry, rhs: Entry) -> ComparisonResult {
-        let lhsValue = columnValues[EntryColumnValueKey(entryID: lhs.id, columnID: columnID)] ?? ""
-        let rhsValue = columnValues[EntryColumnValueKey(entryID: rhs.id, columnID: columnID)] ?? ""
+        let lhsValue = columnValues[EntryColumnValueKey(entryID: lhs.id, columnID: columnID)]?.text ?? ""
+        let rhsValue = columnValues[EntryColumnValueKey(entryID: rhs.id, columnID: columnID)]?.text ?? ""
         let valueComparison = lhsValue.localizedStandardCompare(rhsValue)
         if valueComparison != .orderedSame {
             return valueComparison
@@ -402,7 +404,6 @@ final class EntryListModel: ObservableObject {
         columnValues = try store.loadColumnValues()
         editingEntryIDs = []
         editingColumnKeys = []
-        visibilityRequest = nil
 
         if entries.isEmpty, createEntryIfEmpty {
             createEntry()
@@ -422,7 +423,6 @@ final class EntryListModel: ObservableObject {
         allColumnNames = []
         currentEntryID = nil
         visibleEntries = []
-        visibilityRequest = nil
         editingEntryIDs = []
         editingColumnKeys = []
     }
@@ -458,7 +458,7 @@ final class EntryListModel: ObservableObject {
         }
     }
 
-    private func persistColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: String) {
+    private func persistColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
         guard let store else { return }
         do {
             try store.upsertColumnValue(entryID: entryID, columnID: columnID, value: value)
@@ -530,7 +530,6 @@ final class EntryListModel: ObservableObject {
         columnValues = try store.loadColumnValues()
         allColumnNames = try store.loadAllColumnNames()
         currentEntryID = entries.last?.id
-        visibilityRequest = nil
         editingEntryIDs = []
         editingColumnKeys = []
         refreshVisibleEntries(force: true)
@@ -567,12 +566,48 @@ final class EntryListModel: ObservableObject {
     private func normalizedName(_ name: String) -> String {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
+
+    private static func lastOpenedLibraryURL() -> URL? {
+        guard let path = UserDefaults.standard.string(forKey: lastOpenedLibraryPreferenceKey),
+              !path.isEmpty
+        else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func initialLibraryURL() throws -> URL {
+        if let lastOpenedURL = lastOpenedLibraryURL(),
+           FileManager.default.fileExists(atPath: lastOpenedURL.path) {
+            return lastOpenedURL
+        }
+        return try EntryStore.defaultDatabaseURL
+    }
+
+    private static func rememberLastOpenedLibrary(at url: URL) {
+        UserDefaults.standard.set(url.path, forKey: lastOpenedLibraryPreferenceKey)
+        rememberRecentLibrary(at: url)
+    }
+
+    private static func rememberRecentLibrary(at url: URL) {
+        let normalizedPath = url.path
+        let existingPaths = UserDefaults.standard.stringArray(forKey: recentLibrariesPreferenceKey) ?? []
+        let paths = ([normalizedPath] + existingPaths.filter { $0 != normalizedPath })
+            .filter { FileManager.default.fileExists(atPath: $0) }
+            .prefix(7)
+        UserDefaults.standard.set(Array(paths), forKey: recentLibrariesPreferenceKey)
+    }
+
+    private static func loadRecentLibraryURLs() -> [URL] {
+        let paths = UserDefaults.standard.stringArray(forKey: recentLibrariesPreferenceKey) ?? []
+        let existingPaths = paths.filter { FileManager.default.fileExists(atPath: $0) }
+        if existingPaths.count != paths.count {
+            UserDefaults.standard.set(existingPaths, forKey: recentLibrariesPreferenceKey)
+        }
+        return existingPaths.map { URL(fileURLWithPath: $0) }
+    }
 }
 
-struct EntryVisibilityRequest: Equatable {
-    let id = UUID()
-    let entryID: Entry.ID
-}
+private let lastOpenedLibraryPreferenceKey = "StructureLastOpenedLibraryURL"
+private let recentLibrariesPreferenceKey = "StructureRecentLibraryURLs"
 
 enum ColumnDropPlacement {
     case before

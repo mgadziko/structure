@@ -1,9 +1,14 @@
 import AppKit
 
+extension Notification.Name {
+    static let entryTextSelectionChanged = Notification.Name("StructureEntryTextSelectionChanged")
+}
+
 final class EntrySelectionCoordinator {
     static let shared = EntrySelectionCoordinator()
 
     private let textViews = NSHashTable<NSTextView>.weakObjects()
+    private weak var activeTextView: NSTextView?
     private weak var lastSelectAllTextView: NSTextView?
     private var lastSelectAllTime: Date?
     private let escalationInterval: TimeInterval = 1.1
@@ -19,11 +24,13 @@ final class EntrySelectionCoordinator {
     }
 
     func focus(_ textView: NSTextView) {
+        activeTextView = textView
         for otherTextView in textViews.allObjects where otherTextView !== textView {
             otherTextView.setSelectedRange(NSRange(location: 0, length: 0))
         }
         lastSelectAllTextView = nil
         lastSelectAllTime = nil
+        notifyTextSelectionChanged(in: textView)
     }
 
     func handleSelectAll(in textView: NSTextView) {
@@ -41,6 +48,20 @@ final class EntrySelectionCoordinator {
             lastSelectAllTextView = textView
             lastSelectAllTime = now
         }
+        notifyTextSelectionChanged(in: textView)
+    }
+
+    func notifyTextSelectionChanged() {
+        NotificationCenter.default.post(name: .entryTextSelectionChanged, object: nil)
+    }
+
+    func notifyTextSelectionChanged(in textView: NSTextView) {
+        activeTextView = textView
+        NotificationCenter.default.post(name: .entryTextSelectionChanged, object: textView)
+    }
+
+    func currentTextView() -> NSTextView? {
+        activeTextView ?? NSApp.keyWindow?.firstResponder as? NSTextView
     }
 
     private func selectAllEntryText() {
@@ -64,10 +85,19 @@ final class EntryTextView: NSTextView {
         }
 
         super.keyDown(with: event)
+        EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
     }
 
     override func mouseDown(with event: NSEvent) {
         EntrySelectionCoordinator.shared.focus(self)
         super.mouseDown(with: event)
+        DispatchQueue.main.async {
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
     }
 }

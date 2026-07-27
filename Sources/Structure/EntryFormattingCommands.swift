@@ -76,10 +76,23 @@ enum EntryFormattingCommands {
         guard let textView = activeTextView() else { return }
         let selectedRanges = textView.selectedRanges.compactMap { $0.rangeValue }
         let effectiveRanges = selectedRanges.filter { $0.length > 0 }
+        let currentFont = activeFont(in: textView)
 
         if effectiveRanges.isEmpty {
-            let currentFont = textView.typingAttributes[.font] as? NSFont
-            textView.typingAttributes[.font] = transform(currentFont)
+            let newFont = transform(currentFont)
+            textView.typingAttributes[.font] = newFont
+            textView.font = newFont
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
+            return
+        }
+
+        if !textView.isRichText {
+            let newFont = transform(currentFont)
+            registerUndo(for: textView)
+            textView.font = newFont
+            textView.typingAttributes[.font] = newFont
+            textView.didChangeText()
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
             return
         }
 
@@ -92,7 +105,9 @@ enum EntryFormattingCommands {
             }
         }
         storage.endEditing()
+        textView.typingAttributes[.font] = transform(currentFont)
         textView.didChangeText()
+        EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
     }
 
     private static func toggleFontTrait(_ trait: NSFontTraitMask, in font: NSFont?) -> NSFont {
@@ -115,6 +130,7 @@ enum EntryFormattingCommands {
             } else {
                 textView.typingAttributes.removeValue(forKey: key)
             }
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
             return
         }
 
@@ -131,10 +147,37 @@ enum EntryFormattingCommands {
         }
         storage.endEditing()
         textView.didChangeText()
+        EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
     }
 
     private static func activeTextView() -> NSTextView? {
-        NSApp.keyWindow?.firstResponder as? NSTextView
+        EntrySelectionCoordinator.shared.currentTextView()
+    }
+
+    private static func activeFont(in textView: NSTextView) -> NSFont? {
+        let selectedRange = textView.selectedRange()
+        if let storage = textView.textStorage, storage.length > 0 {
+            let location: Int
+            if selectedRange.length > 0 {
+                location = selectedRange.location
+            } else if selectedRange.location >= storage.length {
+                location = storage.length - 1
+            } else {
+                location = selectedRange.location
+            }
+
+            if location >= 0,
+               location < storage.length,
+               let font = storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont {
+                return font
+            }
+        }
+
+        if let typingFont = textView.typingAttributes[.font] as? NSFont {
+            return typingFont
+        }
+
+        return textView.font
     }
 
     private static func registerUndo(for textView: NSTextView) {

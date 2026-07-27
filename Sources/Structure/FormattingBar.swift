@@ -4,6 +4,7 @@ import SwiftUI
 struct FormattingBar: View {
     @State private var selectedSize = "17"
     @State private var selectedFamily = NSFont.systemFont(ofSize: 17).familyName ?? "System"
+    @State private var isUpdatingFromActiveTextView = false
 
     private let fontSizes = ["8", "10", "12", "14", "16", "18", "20", "24", "28", "32", "36"]
     private let fontFamilies = NSFontManager.shared.availableFontFamilies.sorted {
@@ -26,6 +27,7 @@ struct FormattingBar: View {
             .labelsHidden()
             .frame(width: 180)
             .onChange(of: selectedFamily) { family in
+                guard !isUpdatingFromActiveTextView else { return }
                 EntryFormattingCommands.applyFontFamily(family)
             }
 
@@ -56,6 +58,57 @@ struct FormattingBar: View {
         .padding(.horizontal, 38)
         .padding(.vertical, 7)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onReceive(NotificationCenter.default.publisher(for: .entryTextSelectionChanged)) { notification in
+            updateControlsFromActiveTextView(notification.object as? NSTextView)
+        }
+        .onAppear {
+            updateControlsFromActiveTextView(nil)
+        }
+    }
+
+    private func updateControlsFromActiveTextView(_ textView: NSTextView?) {
+        guard let font = activeFont(in: textView) else { return }
+        let family = font.familyName ?? font.fontName
+        if selectedFamily != family, fontFamilies.contains(family) {
+            isUpdatingFromActiveTextView = true
+            selectedFamily = family
+            DispatchQueue.main.async {
+                isUpdatingFromActiveTextView = false
+            }
+        }
+
+        let size = String(Int(round(font.pointSize)))
+        if selectedSize != size {
+            selectedSize = size
+        }
+    }
+
+    private func activeFont(in notifiedTextView: NSTextView?) -> NSFont? {
+        guard let textView = notifiedTextView ?? EntrySelectionCoordinator.shared.currentTextView() else { return nil }
+
+        let selectedRange = textView.selectedRange()
+        if let storage = textView.textStorage, storage.length > 0 {
+            let location: Int
+            if selectedRange.length > 0 {
+                location = selectedRange.location
+            } else if selectedRange.location >= storage.length {
+                location = storage.length - 1
+            } else {
+                location = selectedRange.location
+            }
+
+            if location >= 0,
+               location < storage.length,
+               let font = storage.attribute(.font, at: location, effectiveRange: nil) as? NSFont {
+                return font
+            }
+        }
+
+        if let typingFont = textView.typingAttributes[.font] as? NSFont {
+            return typingFont
+        }
+
+        return textView.font
     }
 }
 

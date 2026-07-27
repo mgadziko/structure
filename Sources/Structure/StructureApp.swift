@@ -134,6 +134,16 @@ struct StructureApp: App {
                 }
                 .keyboardShortcut("o", modifiers: [.command])
 
+                Menu("Open Recent Library") {
+                    ForEach(model.recentLibraryURLs, id: \.path) { url in
+                        Button(libraryMenuTitle(for: url)) {
+                            model.openLibrary(at: url)
+                        }
+                        .disabled(model.activeLibraryURL?.path == url.path)
+                    }
+                }
+                .disabled(model.recentLibraryURLs.isEmpty)
+
                 Button("Close Library") {
                     model.closeLibrary()
                 }
@@ -180,4 +190,8 @@ struct StructureApp: App {
             }
         }
     }
+}
+
+private func libraryMenuTitle(for url: URL) -> String {
+    url.deletingPathExtension().lastPathComponent
 }

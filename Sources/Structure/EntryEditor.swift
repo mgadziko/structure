@@ -8,9 +8,9 @@ struct EntryEditor: View {
     let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
-    let columnValue: (Entry.ID, EntryColumn.ID) -> String
-    let saveColumnValueDraft: (Entry.ID, EntryColumn.ID, String) -> Void
-    let updateColumnValue: (Entry.ID, EntryColumn.ID, String) -> Void
+    let columnValue: (Entry.ID, EntryColumn.ID) -> EntryColumnValue
+    let saveColumnValueDraft: (Entry.ID, EntryColumn.ID, EntryColumnValue) -> Void
+    let updateColumnValue: (Entry.ID, EntryColumn.ID, EntryColumnValue) -> Void
     let beginEntryEditing: (Entry.ID) -> Void
     let endEntryEditing: (Entry.ID) -> Void
     let beginColumnEditing: (Entry.ID, EntryColumn.ID) -> Void
@@ -52,6 +52,14 @@ struct EntryEditor: View {
             columnCreationSpacer()
 
             VStack(alignment: .leading, spacing: 5) {
+                ZStack(alignment: .topLeading) {
+                    if text.isEmpty {
+                        Text("Type here")
+                            .font(.system(size: 17))
+                            .foregroundStyle(.tertiary)
+                            .allowsHitTesting(false)
+                    }
+
                 RichTextEntryEditor(
                     entryID: entry.id,
                     body: $text,
@@ -67,6 +75,7 @@ struct EntryEditor: View {
                 )
                     .frame(height: editorHeight)
                     .accessibilityLabel("Entry created \(entry.displayDate)")
+                }
             }
             .frame(width: EntryRowLayout.entryColumnWidth, alignment: .leading)
 
@@ -107,15 +116,16 @@ enum EntryRowLayout {
 }
 
 private struct UndefinedColumnCell: View {
-    let value: String
+    let value: EntryColumnValue
     let columnTitle: String
     let width: Double
     let rowHeight: CGFloat
-    let saveDraft: (String) -> Void
-    let commit: (String) -> Void
+    let saveDraft: (EntryColumnValue) -> Void
+    let commit: (EntryColumnValue) -> Void
     let beginEditing: () -> Void
     let endEditing: () -> Void
     @State private var draft = ""
+    @State private var draftRichTextData: Data?
     @State private var cellHeight: CGFloat = 24
 
     private var displayHeight: CGFloat {
@@ -126,6 +136,7 @@ private struct UndefinedColumnCell: View {
         ZStack(alignment: .topLeading) {
             ExpandingColumnTextEditor(
                 text: $draft,
+                richTextData: $draftRichTextData,
                 height: $cellHeight,
                 width: width,
                 displayHeight: displayHeight,
@@ -152,21 +163,24 @@ private struct UndefinedColumnCell: View {
             .accessibilityLabel("\(columnTitle) value")
             .frame(width: width, height: displayHeight, alignment: .topLeading)
             .onAppear {
-                draft = value
+                draft = value.text
+                draftRichTextData = value.richTextData
             }
             .onChange(of: value) { newValue in
-                draft = newValue
+                draft = newValue.text
+                draftRichTextData = newValue.richTextData
             }
     }
 }
 
 private struct ExpandingColumnTextEditor: NSViewRepresentable {
     @Binding var text: String
+    @Binding var richTextData: Data?
     @Binding var height: CGFloat
     let width: Double
     let displayHeight: CGFloat
-    let onDraftChange: (String) -> Void
-    let onCommit: (String) -> Void
+    let onDraftChange: (EntryColumnValue) -> Void
+    let onCommit: (EntryColumnValue) -> Void
     let onBeginEditing: () -> Void
     let onEndEditing: () -> Void
 
@@ -177,15 +191,15 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
 
-        let textView = NSTextView()
-        textView.isRichText = false
+        let textView = ColumnCellTextView()
+        textView.isRichText = true
         textView.importsGraphics = false
         textView.allowsUndo = true
         textView.isEditable = true
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.font = .systemFont(ofSize: 14)
         textView.textColor = .labelColor
+        textView.typingAttributes = columnTypingAttributes()
         textView.textContainerInset = NSSize(width: 6, height: 3)
         textView.frame = NSRect(
             x: 0,
@@ -206,9 +220,10 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         textView.delegate = context.coordinator
+        EntrySelectionCoordinator.shared.register(textView)
 
         context.coordinator.textView = textView
-        context.coordinator.applyText(text)
+        context.coordinator.apply(text: text, richTextData: richTextData)
         context.coordinator.updateHeight()
 
         scrollView.documentView = textView
@@ -220,8 +235,9 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? NSTextView else { return }
         context.coordinator.parent = self
         context.coordinator.applyWidth(width)
-        if !context.coordinator.isEditing, textView.string != text {
-            context.coordinator.applyText(text)
+        if !context.coordinator.isEditing,
+           textView.string != text || context.coordinator.appliedRichTextData != richTextData {
+            context.coordinator.apply(text: text, richTextData: richTextData)
         }
         context.coordinator.updateHeight()
     }
@@ -234,12 +250,16 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
         var parent: ExpandingColumnTextEditor
         weak var textView: NSTextView?
         var isEditing = false
+        var appliedRichTextData: Data?
 
         init(parent: ExpandingColumnTextEditor) {
             self.parent = parent
         }
 
         func textDidBeginEditing(_ notification: Notification) {
+            if let textView = notification.object as? NSTextView {
+                EntrySelectionCoordinator.shared.focus(textView)
+            }
             isEditing = true
             parent.onBeginEditing()
         }
@@ -247,22 +267,51 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
-            parent.onDraftChange(textView.string)
+            parent.richTextData = rtfData(from: textView)
+            parent.onDraftChange(EntryColumnValue(text: textView.string, richTextData: parent.richTextData))
             updateHeight()
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
         }
 
         func textDidEndEditing(_ notification: Notification) {
             isEditing = false
-            parent.onCommit(parent.text)
+            parent.onCommit(EntryColumnValue(text: parent.text, richTextData: parent.richTextData))
             parent.onEndEditing()
-            applyText(parent.text)
+            apply(text: parent.text, richTextData: parent.richTextData)
         }
 
-        func applyText(_ text: String) {
+        func apply(text: String, richTextData: Data?) {
             guard let textView else { return }
-            textView.string = text
+            if let richTextData,
+               let attributed = try? NSAttributedString(
+                data: richTextData,
+                options: [.documentType: NSAttributedString.DocumentType.rtf],
+                documentAttributes: nil
+               ) {
+                let readable = NSMutableAttributedString(attributedString: attributed)
+                normalizeReadableTextColor(in: readable)
+                textView.textStorage?.setAttributedString(readable)
+            } else {
+                textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: columnTypingAttributes()))
+            }
+            appliedRichTextData = richTextData
             textView.textColor = .labelColor
+            textView.typingAttributes.merge(columnTypingAttributes()) { current, _ in current }
             updateHeight()
+        }
+
+        private func rtfData(from textView: NSTextView) -> Data? {
+            guard let storage = textView.textStorage else { return nil }
+            let range = NSRange(location: 0, length: storage.length)
+            return try? storage.data(
+                from: range,
+                documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf]
+            )
         }
 
         func applyWidth(_ width: Double) {
@@ -312,8 +361,51 @@ private final class ColumnCellScrollView: NSScrollView {
     override func mouseDown(with event: NSEvent) {
         if let textView {
             window?.makeFirstResponder(textView)
+            EntrySelectionCoordinator.shared.focus(textView)
         }
         super.mouseDown(with: event)
+        if let textView {
+            DispatchQueue.main.async {
+                EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
+            }
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        if let textView {
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: textView)
+        }
+    }
+}
+
+private final class ColumnCellTextView: NSTextView {
+    deinit {
+        EntrySelectionCoordinator.shared.unregister(self)
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "a" {
+            EntrySelectionCoordinator.shared.handleSelectAll(in: self)
+            return
+        }
+
+        super.keyDown(with: event)
+        EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        EntrySelectionCoordinator.shared.focus(self)
+        super.mouseDown(with: event)
+        DispatchQueue.main.async {
+            EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
     }
 }
 
@@ -325,4 +417,11 @@ private func columnCreationSpacer() -> some View {
     Color.clear
         .frame(width: EntryRowLayout.columnCreationControlWidth, height: 18)
         .accessibilityHidden(true)
+}
+
+private func columnTypingAttributes() -> [NSAttributedString.Key: Any] {
+    [
+        .font: NSFont.systemFont(ofSize: 14),
+        .foregroundColor: NSColor.labelColor
+    ]
 }

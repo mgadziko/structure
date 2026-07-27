@@ -61,3 +61,10 @@ struct EntryColumnValueKey: Hashable {
     let entryID: Entry.ID
     let columnID: EntryColumn.ID
 }
+
+struct EntryColumnValue: Equatable {
+    var text: String
+    var richTextData: Data?
+
+    static let empty = EntryColumnValue(text: "", richTextData: nil)
+}
