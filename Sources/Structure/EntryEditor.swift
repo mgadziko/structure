@@ -3,6 +3,7 @@ import SwiftUI
 
 struct EntryEditor: View {
     let entry: Entry
+    let rowNumber: Int
     @Binding var text: String
     @Binding var richTextData: Data?
     let showCreatedColumn: Bool
@@ -20,6 +21,13 @@ struct EntryEditor: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
+            Text("\(rowNumber)")
+                .font(.system(size: 12, weight: .regular))
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .frame(width: EntryRowLayout.rowNumberColumnWidth, alignment: .trailing)
+                .padding(.top, 8)
+
             if showCreatedColumn {
                 Text(entry.displayDate)
                     .font(.system(size: 12, weight: .regular))
@@ -31,6 +39,8 @@ struct EntryEditor: View {
             ForEach(columnsBeforeEntry) { column in
                 UndefinedColumnCell(
                     value: columnValue(entry.id, column.id),
+                    entryID: entry.id,
+                    columnID: column.id,
                     columnTitle: column.title,
                     width: column.width,
                     rowHeight: editorHeight,
@@ -60,7 +70,7 @@ struct EntryEditor: View {
                             .allowsHitTesting(false)
                     }
 
-                RichTextEntryEditor(
+                    RichTextEntryEditor(
                     entryID: entry.id,
                     body: $text,
                     richTextData: $richTextData,
@@ -84,6 +94,8 @@ struct EntryEditor: View {
             ForEach(columnsAfterEntry) { column in
                 UndefinedColumnCell(
                     value: columnValue(entry.id, column.id),
+                    entryID: entry.id,
+                    columnID: column.id,
                     columnTitle: column.title,
                     width: column.width,
                     rowHeight: editorHeight,
@@ -102,11 +114,33 @@ struct EntryEditor: View {
                 )
             }
         }
+        .onAppear {
+            EntrySelectionCoordinator.shared.updateCellOrder(
+                entryID: entry.id,
+                columnsBeforeEntry: columnsBeforeEntry,
+                columnsAfterEntry: columnsAfterEntry
+            )
+        }
+        .onChange(of: columnsBeforeEntry) { _ in
+            EntrySelectionCoordinator.shared.updateCellOrder(
+                entryID: entry.id,
+                columnsBeforeEntry: columnsBeforeEntry,
+                columnsAfterEntry: columnsAfterEntry
+            )
+        }
+        .onChange(of: columnsAfterEntry) { _ in
+            EntrySelectionCoordinator.shared.updateCellOrder(
+                entryID: entry.id,
+                columnsBeforeEntry: columnsBeforeEntry,
+                columnsAfterEntry: columnsAfterEntry
+            )
+        }
     }
 }
 
 enum EntryRowLayout {
     static let horizontalPadding: CGFloat = 38
+    static let rowNumberColumnWidth: CGFloat = 34
     static let createdColumnWidth: CGFloat = 150
     static let columnCreationControlWidth: CGFloat = 18
     static let defaultUndefinedColumnWidth: Double = 120
@@ -117,6 +151,8 @@ enum EntryRowLayout {
 
 private struct UndefinedColumnCell: View {
     let value: EntryColumnValue
+    let entryID: Entry.ID
+    let columnID: EntryColumn.ID
     let columnTitle: String
     let width: Double
     let rowHeight: CGFloat
@@ -137,6 +173,8 @@ private struct UndefinedColumnCell: View {
             ExpandingColumnTextEditor(
                 text: $draft,
                 richTextData: $draftRichTextData,
+                entryID: entryID,
+                columnID: columnID,
                 height: $cellHeight,
                 width: width,
                 displayHeight: displayHeight,
@@ -148,7 +186,7 @@ private struct UndefinedColumnCell: View {
 
             if draft.isEmpty {
                 Text("...")
-                    .font(.system(size: 14))
+                    .font(.custom("New York", size: 17))
                     .foregroundStyle(.tertiary)
                     .padding(.leading, 6)
                     .padding(.top, 3)
@@ -176,6 +214,8 @@ private struct UndefinedColumnCell: View {
 private struct ExpandingColumnTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var richTextData: Data?
+    let entryID: Entry.ID
+    let columnID: EntryColumn.ID
     @Binding var height: CGFloat
     let width: Double
     let displayHeight: CGFloat
@@ -220,7 +260,7 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
             height: CGFloat.greatestFiniteMagnitude
         )
         textView.delegate = context.coordinator
-        EntrySelectionCoordinator.shared.register(textView)
+        EntrySelectionCoordinator.shared.registerColumnTextView(textView, entryID: entryID, columnID: columnID)
 
         context.coordinator.textView = textView
         context.coordinator.apply(text: text, richTextData: richTextData)
@@ -385,6 +425,10 @@ private final class ColumnCellTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleTabNavigation(in: self, event: event) {
+            return
+        }
+
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "a" {
             EntrySelectionCoordinator.shared.handleSelectAll(in: self)
@@ -420,8 +464,5 @@ private func columnCreationSpacer() -> some View {
 }
 
 private func columnTypingAttributes() -> [NSAttributedString.Key: Any] {
-    [
-        .font: NSFont.systemFont(ofSize: 14),
-        .foregroundColor: NSColor.labelColor
-    ]
+    defaultTypingAttributes()
 }

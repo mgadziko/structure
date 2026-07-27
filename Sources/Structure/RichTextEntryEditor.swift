@@ -36,7 +36,7 @@ struct RichTextEntryEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.delegate = context.coordinator
-        EntrySelectionCoordinator.shared.register(textView)
+        EntrySelectionCoordinator.shared.registerEntryTextView(textView, entryID: entryID)
 
         context.coordinator.textView = textView
         context.coordinator.scrollView = scrollView
@@ -147,6 +147,9 @@ struct RichTextEntryEditor: NSViewRepresentable {
             DispatchQueue.main.async {
                 if let window = textView.window {
                     window.makeFirstResponder(textView)
+                    let end = (textView.string as NSString).length
+                    textView.setSelectedRange(NSRange(location: end, length: 0))
+                    textView.scrollRangeToVisible(NSRange(location: end, length: 0))
                     EntrySelectionCoordinator.shared.focus(textView)
                     self.pendingFocusAttempts = 0
                 } else if self.pendingFocusAttempts < 4 {

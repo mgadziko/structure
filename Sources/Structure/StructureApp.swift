@@ -122,6 +122,7 @@ struct StructureApp: App {
         WindowGroup("Structure") {
             EntryStreamView(model: model)
                 .frame(minWidth: 620, minHeight: 520)
+                .background(WindowTitleSetter(title: model.windowTitle))
         }
         .commands {
             CommandGroup(replacing: .newItem) {
@@ -193,5 +194,28 @@ struct StructureApp: App {
 }
 
 private func libraryMenuTitle(for url: URL) -> String {
-    url.deletingPathExtension().lastPathComponent
+    let defaultURL = try? EntryStore.defaultDatabaseURL
+    let legacyDefaultURL = try? EntryStore.legacyDefaultDatabaseURL
+    if url.path == defaultURL?.path || url.path == legacyDefaultURL?.path {
+        return "Initial Library"
+    }
+    return url.deletingPathExtension().lastPathComponent
+}
+
+private struct WindowTitleSetter: NSViewRepresentable {
+    let title: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            view.window?.title = title
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            view.window?.title = title
+        }
+    }
 }

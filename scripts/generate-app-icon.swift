@@ -36,7 +36,7 @@ for iconFile in iconFiles {
     let strokeWidth = max(1.25, 18 * scale)
     let circles: [(color: NSColor, center: CGPoint)] = [
         (NSColor(calibratedRed: 0.93, green: 0.05, blue: 0.08, alpha: 0.62), CGPoint(x: 392 * scale, y: 608 * scale)),
-        (NSColor(calibratedRed: 0.06, green: 0.64, blue: 0.20, alpha: 0.62), CGPoint(x: 632 * scale, y: 608 * scale)),
+        (NSColor(calibratedRed: 0.98, green: 0.84, blue: 0.06, alpha: 0.62), CGPoint(x: 632 * scale, y: 608 * scale)),
         (NSColor(calibratedRed: 0.05, green: 0.27, blue: 0.92, alpha: 0.62), CGPoint(x: 512 * scale, y: 392 * scale))
     ]
 

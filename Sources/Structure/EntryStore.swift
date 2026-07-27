@@ -9,6 +9,12 @@ final class EntryStore {
         }
     }
 
+    static var legacyDefaultDatabaseURL: URL {
+        get throws {
+            try databaseDirectory().appendingPathComponent("Structure.sqlite")
+        }
+    }
+
     convenience init() throws {
         try self.init(databaseURL: Self.databaseURL())
     }
@@ -163,6 +169,39 @@ final class EntryStore {
         }
 
         return names
+    }
+
+    func loadColumnTemplate(named title: String) throws -> EntryColumn? {
+        let sql = """
+        SELECT id, view_id, title, placement, order_index, width, definition_kind
+        FROM entry_columns
+        WHERE title = ? COLLATE NOCASE AND deleted_at IS NULL
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, title, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let idText = sqlite3_column_text(statement, 0),
+              let viewIDText = sqlite3_column_text(statement, 1),
+              let titleText = sqlite3_column_text(statement, 2),
+              let placementText = sqlite3_column_text(statement, 3)
+        else { return nil }
+
+        let definitionText = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
+        return EntryColumn(
+            id: String(cString: idText),
+            viewID: String(cString: viewIDText),
+            title: String(cString: titleText),
+            placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
+            orderIndex: Int(sqlite3_column_int(statement, 4)),
+            width: sqlite3_column_double(statement, 5),
+            definition: EntryColumnDefinition(rawValue: definitionText) ?? .none
+        )
     }
 
     func insert(_ entry: Entry) throws {
@@ -411,6 +450,29 @@ final class EntryStore {
         try step(statement)
     }
 
+    func copyColumnValues(from sourceColumnID: EntryColumn.ID, to targetColumnID: EntryColumn.ID, updatedAt: Date = Date()) throws {
+        let sql = """
+        INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
+        SELECT entry_id, ?, value_text, value_rtf, ?, ?
+        FROM entry_column_values
+        WHERE column_id = ?
+        ON CONFLICT(entry_id, column_id) DO UPDATE SET
+            value_text = excluded.value_text,
+            value_rtf = excluded.value_rtf,
+            updated_at = excluded.updated_at;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, targetColumnID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 3, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 4, sourceColumnID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
     private func open(path: String) throws {
         if sqlite3_open(path, &db) != SQLITE_OK {
             throw StructureError.sqlite(lastError)
@@ -610,12 +672,16 @@ final class EntryStore {
     }
 
     private static func databaseURL() throws -> URL {
+        try databaseDirectory().appendingPathComponent("Initial Library.structurelibrary")
+    }
+
+    private static func databaseDirectory() throws -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         guard let directory = base?.appendingPathComponent("Structure", isDirectory: true) else {
             throw StructureError.storagePathUnavailable
         }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appendingPathComponent("Structure.sqlite")
+        return directory
     }
 }
 

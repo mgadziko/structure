@@ -28,9 +28,10 @@ struct EntryStreamView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        ForEach(model.visibleEntries) { entry in
+                        ForEach(Array(model.visibleEntries.enumerated()), id: \.element.id) { index, entry in
                             EntryEditor(
                                 entry: entry,
+                                rowNumber: index + 1,
                                 text: binding(for: entry.id),
                                 richTextData: richTextBinding(for: entry.id),
                                 showCreatedColumn: model.showCreatedColumn,
@@ -98,6 +99,8 @@ struct EntryStreamView: View {
 
     private func focusCurrentEntry(proxy: ScrollViewProxy, animated: Bool) {
         guard let id = model.currentEntryID else { return }
+        focusedEntryID = id
+        EntrySelectionCoordinator.shared.focusEntry(id: id)
         DispatchQueue.main.async {
             if animated {
                 withAnimation(.easeOut(duration: 0.18)) {
@@ -107,6 +110,10 @@ struct EntryStreamView: View {
                 proxy.scrollTo(id, anchor: .bottom)
             }
             focusedEntryID = id
+            EntrySelectionCoordinator.shared.focusEntry(id: id)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                EntrySelectionCoordinator.shared.focusEntry(id: id)
+            }
         }
     }
 

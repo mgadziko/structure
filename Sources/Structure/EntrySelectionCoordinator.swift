@@ -8,6 +8,10 @@ final class EntrySelectionCoordinator {
     static let shared = EntrySelectionCoordinator()
 
     private let textViews = NSHashTable<NSTextView>.weakObjects()
+    private var entryTextViews: [Entry.ID: WeakTextView] = [:]
+    private var cellTextViews: [StructureCellID: WeakTextView] = [:]
+    private var cellIDsByTextViewID: [ObjectIdentifier: StructureCellID] = [:]
+    private var cellOrderByEntryID: [Entry.ID: [StructureCellID]] = [:]
     private weak var activeTextView: NSTextView?
     private weak var lastSelectAllTextView: NSTextView?
     private var lastSelectAllTime: Date?
@@ -19,11 +23,65 @@ final class EntrySelectionCoordinator {
         textViews.add(textView)
     }
 
-    func unregister(_ textView: NSTextView) {
-        textViews.remove(textView)
+    func registerEntryTextView(_ textView: NSTextView, entryID: Entry.ID) {
+        register(textView, cellID: .entry(entryID))
+        entryTextViews[entryID] = WeakTextView(textView)
     }
 
-    func focus(_ textView: NSTextView) {
+    func registerColumnTextView(_ textView: NSTextView, entryID: Entry.ID, columnID: EntryColumn.ID) {
+        register(textView, cellID: .column(entryID: entryID, columnID: columnID))
+    }
+
+    func register(_ textView: NSTextView, cellID: StructureCellID) {
+        register(textView)
+        cellTextViews[cellID] = WeakTextView(textView)
+        cellIDsByTextViewID[ObjectIdentifier(textView)] = cellID
+    }
+
+    func unregister(_ textView: NSTextView) {
+        textViews.remove(textView)
+        entryTextViews = entryTextViews.filter { $0.value.textView !== textView && $0.value.textView != nil }
+        cellTextViews = cellTextViews.filter { $0.value.textView !== textView && $0.value.textView != nil }
+        cellIDsByTextViewID.removeValue(forKey: ObjectIdentifier(textView))
+    }
+
+    func updateCellOrder(entryID: Entry.ID, columnsBeforeEntry: [EntryColumn], columnsAfterEntry: [EntryColumn]) {
+        cellOrderByEntryID[entryID] =
+            columnsBeforeEntry.map { .column(entryID: entryID, columnID: $0.id) }
+            + [.entry(entryID)]
+            + columnsAfterEntry.map { .column(entryID: entryID, columnID: $0.id) }
+    }
+
+    func focusEntry(id: Entry.ID) {
+        guard let textView = entryTextViews[id]?.textView else { return }
+        focusAndPlaceInsertionPoint(in: textView)
+    }
+
+    func moveFocus(from textView: NSTextView, direction: CellFocusDirection) -> Bool {
+        guard
+            let cellID = cellIDsByTextViewID[ObjectIdentifier(textView)],
+            let entryID = cellID.entryID,
+            let rowOrder = cellOrderByEntryID[entryID],
+            let currentIndex = rowOrder.firstIndex(of: cellID)
+        else { return false }
+
+        let targetIndex: Int
+        switch direction {
+        case .left:
+            targetIndex = currentIndex - 1
+        case .right:
+            targetIndex = currentIndex + 1
+        }
+
+        guard rowOrder.indices.contains(targetIndex),
+              let targetTextView = cellTextViews[rowOrder[targetIndex]]?.textView
+        else { return false }
+
+        focusAndPlaceInsertionPoint(in: targetTextView)
+        return true
+    }
+
+    func focusTextView(_ textView: NSTextView) {
         activeTextView = textView
         for otherTextView in textViews.allObjects where otherTextView !== textView {
             otherTextView.setSelectedRange(NSRange(location: 0, length: 0))
@@ -31,6 +89,23 @@ final class EntrySelectionCoordinator {
         lastSelectAllTextView = nil
         lastSelectAllTime = nil
         notifyTextSelectionChanged(in: textView)
+    }
+
+    private func focusAndPlaceInsertionPoint(in textView: NSTextView) {
+        focusTextView(textView)
+        placeInsertionPoint(in: textView)
+    }
+
+    private func placeInsertionPoint(in textView: NSTextView) {
+        textView.window?.makeFirstResponder(textView)
+        let end = (textView.string as NSString).length
+        textView.setSelectedRange(NSRange(location: end, length: 0))
+        textView.scrollRangeToVisible(NSRange(location: end, length: 0))
+        notifyTextSelectionChanged(in: textView)
+    }
+
+    func focus(_ textView: NSTextView) {
+        focusTextView(textView)
     }
 
     func handleSelectAll(in textView: NSTextView) {
@@ -72,12 +147,43 @@ final class EntrySelectionCoordinator {
     }
 }
 
+enum CellFocusDirection {
+    case left
+    case right
+}
+
+enum StructureCellID: Hashable {
+    case entry(Entry.ID)
+    case column(entryID: Entry.ID, columnID: EntryColumn.ID)
+
+    var entryID: Entry.ID? {
+        switch self {
+        case .entry(let entryID):
+            return entryID
+        case .column(let entryID, _):
+            return entryID
+        }
+    }
+}
+
+private final class WeakTextView {
+    weak var textView: NSTextView?
+
+    init(_ textView: NSTextView) {
+        self.textView = textView
+    }
+}
+
 final class EntryTextView: NSTextView {
     deinit {
         EntrySelectionCoordinator.shared.unregister(self)
     }
 
     override func keyDown(with event: NSEvent) {
+        if handleTabNavigation(in: self, event: event) {
+            return
+        }
+
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "a" {
             EntrySelectionCoordinator.shared.handleSelectAll(in: self)
@@ -100,4 +206,12 @@ final class EntryTextView: NSTextView {
         super.mouseUp(with: event)
         EntrySelectionCoordinator.shared.notifyTextSelectionChanged(in: self)
     }
+}
+
+func handleTabNavigation(in textView: NSTextView, event: NSEvent) -> Bool {
+    guard event.keyCode == 48 else { return false }
+    let direction: CellFocusDirection = event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift)
+        ? .left
+        : .right
+    return EntrySelectionCoordinator.shared.moveFocus(from: textView, direction: direction)
 }

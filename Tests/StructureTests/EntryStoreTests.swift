@@ -231,6 +231,68 @@ final class EntryStoreTests: XCTestCase {
         ])
     }
 
+    func testColumnTemplateAndValueCopySupportReusingColumnInNewView() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Hello Structure",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let sourceColumn = EntryColumn(
+            id: "column-source",
+            title: "Second Column",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 240,
+            definition: .attribute
+        )
+        let targetColumn = EntryColumn(
+            id: "column-target",
+            viewID: "view-2",
+            title: "Second Column",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 240,
+            definition: .attribute
+        )
+        let richTextData = Data("copied rtf".utf8)
+
+        try store.insert(entry)
+        try store.insertColumn(sourceColumn, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: sourceColumn.id,
+            value: EntryColumnValue(text: "existing value", richTextData: richTextData),
+            updatedAt: timestamp
+        )
+
+        let template = try XCTUnwrap(try store.loadColumnTemplate(named: "second column"))
+        XCTAssertEqual(template.title, sourceColumn.title)
+        XCTAssertEqual(template.width, sourceColumn.width)
+        XCTAssertEqual(template.definition, sourceColumn.definition)
+
+        try store.insertView(StructureView(
+            id: "view-2",
+            title: "New View",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        ))
+        try store.insertColumn(targetColumn, createdAt: timestamp)
+        try store.copyColumnValues(from: sourceColumn.id, to: targetColumn.id, updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadColumnValues()[EntryColumnValueKey(entryID: entry.id, columnID: targetColumn.id)], EntryColumnValue(
+            text: "existing value",
+            richTextData: richTextData
+        ))
+    }
+
     func testLegacyColumnValuesMigrateRichTextColumn() throws {
         let databaseURL = try temporaryDatabaseURL()
         try createLegacyColumnValueDatabase(at: databaseURL)

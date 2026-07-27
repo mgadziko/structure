@@ -21,6 +21,12 @@ struct EntryColumnHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 18) {
+            Text("#")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: EntryRowLayout.rowNumberColumnWidth, alignment: .trailing)
+                .accessibilityLabel("Row number")
+
             if showCreatedColumn {
                 SortHeaderButton(
                     title: "Created",
@@ -80,6 +86,9 @@ struct EntryColumnHeader: View {
                     resizeColumn: resizeColumn
                 )
             }
+            if let lastColumn = columnsAfterEntry.last {
+                trailingColumnDropZone(after: lastColumn)
+            }
             Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,6 +136,23 @@ struct EntryColumnHeader: View {
         self.draftColumnPlacement = nil
         draftColumnTitle = ""
     }
+
+    private func trailingColumnDropZone(after column: EntryColumn) -> some View {
+        Color.clear
+            .frame(width: 72, height: 28)
+            .contentShape(Rectangle())
+            .onDrop(
+                of: [UTType.text],
+                delegate: EntryColumnDropDelegate(
+                    targetColumnID: column.id,
+                    targetWidth: 1,
+                    forcedPlacement: .after,
+                    draggedColumnID: $draggedColumnID,
+                    moveColumn: moveColumn
+                )
+            )
+            .help("Drop here to move column to the far right")
+    }
 }
 
 private struct ColumnNameComboBox: NSViewRepresentable {
@@ -172,7 +198,13 @@ private struct ColumnNameComboBox: NSViewRepresentable {
 
         func comboBoxSelectionDidChange(_ notification: Notification) {
             guard let comboBox = notification.object as? NSComboBox else { return }
-            text = comboBox.stringValue
+            if comboBox.indexOfSelectedItem >= 0,
+               let selectedValue = comboBox.itemObjectValue(at: comboBox.indexOfSelectedItem) as? String {
+                text = selectedValue
+                comboBox.stringValue = selectedValue
+            } else {
+                text = comboBox.stringValue
+            }
             onCommit()
         }
 
@@ -354,6 +386,7 @@ private final class ResizeCursorNSView: NSView {
 private struct EntryColumnDropDelegate: DropDelegate {
     let targetColumnID: EntryColumn.ID
     let targetWidth: Double
+    var forcedPlacement: ColumnDropPlacement?
     @Binding var draggedColumnID: EntryColumn.ID?
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
 
@@ -366,7 +399,7 @@ private struct EntryColumnDropDelegate: DropDelegate {
             self.draggedColumnID = nil
             return false
         }
-        let placement: ColumnDropPlacement = info.location.x < targetWidth / 2 ? .before : .after
+        let placement: ColumnDropPlacement = forcedPlacement ?? (info.location.x < targetWidth / 2 ? .before : .after)
         moveColumn(draggedColumnID, targetColumnID, placement)
         self.draggedColumnID = nil
         return true

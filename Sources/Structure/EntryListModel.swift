@@ -48,6 +48,16 @@ final class EntryListModel: ObservableObject {
         activeView?.title ?? ""
     }
 
+    var activeLibraryName: String {
+        guard let activeLibraryURL else { return "" }
+        return Self.libraryDisplayName(for: activeLibraryURL)
+    }
+
+    var windowTitle: String {
+        guard hasOpenLibrary else { return "Structure" }
+        return "Structure - \(activeLibraryName)"
+    }
+
     var showCreatedColumn: Bool {
         activeView?.showsCreatedColumn ?? false
     }
@@ -233,17 +243,22 @@ final class EntryListModel: ObservableObject {
               !trimmedTitle.isEmpty,
               isUniqueColumnNameInActiveView(trimmedTitle)
         else { return }
+
+        let template = try? store?.loadColumnTemplate(named: trimmedTitle)
+        let insertionIndex = columnInsertionIndex(for: placement)
         let column = EntryColumn(
             id: UUID().uuidString,
             viewID: activeView.id,
-            title: trimmedTitle,
+            title: template?.title ?? trimmedTitle,
             placement: placement,
-            orderIndex: columns.count,
-            width: EntryRowLayout.defaultUndefinedColumnWidth,
-            definition: .none
+            orderIndex: insertionIndex,
+            width: template?.width ?? EntryRowLayout.defaultUndefinedColumnWidth,
+            definition: template?.definition ?? .none
         )
-        columns.append(column)
-        persistColumn(column)
+        columns.insert(column, at: insertionIndex)
+        updateColumnOrderIndexes()
+        persistColumn(column, copyingValuesFrom: template?.id)
+        persistColumnOrder()
         refreshAvailableColumnNames()
     }
 
@@ -271,9 +286,7 @@ final class EntryListModel: ObservableObject {
         }
         columns.insert(movedColumn, at: insertionIndex)
 
-        for index in columns.indices {
-            columns[index].orderIndex = index
-        }
+        updateColumnOrderIndexes()
         persistColumnOrder()
     }
 
@@ -447,10 +460,14 @@ final class EntryListModel: ObservableObject {
         }
     }
 
-    private func persistColumn(_ column: EntryColumn) {
+    private func persistColumn(_ column: EntryColumn, copyingValuesFrom sourceColumnID: EntryColumn.ID? = nil) {
         guard let store else { return }
         do {
             try store.insertColumn(column)
+            if let sourceColumnID {
+                try store.copyColumnValues(from: sourceColumnID, to: column.id)
+                columnValues = try store.loadColumnValues()
+            }
             allColumnNames = try store.loadAllColumnNames()
             errorMessage = nil
         } catch {
@@ -563,6 +580,21 @@ final class EntryListModel: ObservableObject {
         return !columns.contains { normalizedName($0.title) == normalized }
     }
 
+    private func columnInsertionIndex(for placement: EntryColumnPlacement) -> Int {
+        switch placement {
+        case .beforeEntry:
+            return columns.lastIndex(where: { $0.placement == .beforeEntry }).map { $0 + 1 } ?? 0
+        case .afterEntry:
+            return columns.firstIndex(where: { $0.placement == .afterEntry }) ?? columns.count
+        }
+    }
+
+    private func updateColumnOrderIndexes() {
+        for index in columns.indices {
+            columns[index].orderIndex = index
+        }
+    }
+
     private func normalizedName(_ name: String) -> String {
         name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
@@ -578,6 +610,10 @@ final class EntryListModel: ObservableObject {
         if let lastOpenedURL = lastOpenedLibraryURL(),
            FileManager.default.fileExists(atPath: lastOpenedURL.path) {
             return lastOpenedURL
+        }
+        let legacyDefaultURL = try EntryStore.legacyDefaultDatabaseURL
+        if FileManager.default.fileExists(atPath: legacyDefaultURL.path) {
+            return legacyDefaultURL
         }
         return try EntryStore.defaultDatabaseURL
     }
@@ -603,6 +639,15 @@ final class EntryListModel: ObservableObject {
             UserDefaults.standard.set(existingPaths, forKey: recentLibrariesPreferenceKey)
         }
         return existingPaths.map { URL(fileURLWithPath: $0) }
+    }
+
+    private static func libraryDisplayName(for url: URL) -> String {
+        let defaultURL = try? EntryStore.defaultDatabaseURL
+        let legacyDefaultURL = try? EntryStore.legacyDefaultDatabaseURL
+        if url.path == defaultURL?.path || url.path == legacyDefaultURL?.path {
+            return "Initial Library"
+        }
+        return url.deletingPathExtension().lastPathComponent
     }
 }
 
