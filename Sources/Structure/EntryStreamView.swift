@@ -61,6 +61,23 @@ struct EntryStreamView: View {
                 .onChange(of: model.currentEntryID) { id in
                     focusCurrentEntry(proxy: proxy, animated: id != nil)
                 }
+                .onReceive(NotificationCenter.default.publisher(for: .entryFindResultSelected)) { notification in
+                    guard let request = notification.object as? FindResultFocusRequest,
+                          let entryID = request.cellID.entryID
+                    else { return }
+
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(entryID, anchor: .center)
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        EntrySelectionCoordinator.shared.selectFindResult(
+                            cellID: request.cellID,
+                            range: request.range,
+                            notifyScroll: false
+                        )
+                    }
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

@@ -15,6 +15,7 @@ final class EntryListModel: ObservableObject {
     @Published private(set) var activeLibraryURL: URL?
     @Published private(set) var allColumnNames: [String] = []
     @Published private(set) var recentLibraryURLs: [URL] = []
+    @Published var findText = ""
 
     private var store: EntryStore?
     private var editingEntryIDs: Set<Entry.ID> = []
@@ -353,6 +354,50 @@ final class EntryListModel: ObservableObject {
         persistColumnWidth(columnID: columnID, width: clampedWidth)
     }
 
+    func findNext(_ query: String) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+        findText = trimmedQuery
+
+        let cells = searchableCells()
+        guard !cells.isEmpty else { return }
+
+        let anchor = EntrySelectionCoordinator.shared.currentFindAnchor()
+        let anchorIndex = anchor.flatMap { anchor in
+            cells.firstIndex { $0.id == anchor.cellID }
+        }
+        let startIndex = anchorIndex ?? 0
+        let startLocation = anchor.map { $0.selectedRange.location + $0.selectedRange.length } ?? 0
+
+        if let result = find(trimmedQuery, in: cells[startIndex], startingAt: startLocation) {
+            EntrySelectionCoordinator.shared.selectFindResult(cellID: result.cellID, range: result.range)
+            return
+        }
+
+        if cells.count > 1 {
+            let nextIndex = cells.index(after: startIndex)
+            if nextIndex < cells.endIndex,
+               let result = find(trimmedQuery, in: cells[nextIndex..<cells.endIndex], startingAt: 0) {
+                EntrySelectionCoordinator.shared.selectFindResult(cellID: result.cellID, range: result.range)
+                return
+            }
+        }
+
+        if startIndex > 0,
+           let result = find(trimmedQuery, in: cells[..<startIndex], startingAt: 0) {
+            EntrySelectionCoordinator.shared.selectFindResult(cellID: result.cellID, range: result.range)
+            return
+        }
+
+        if startLocation > 0,
+           let result = find(trimmedQuery, in: cells[startIndex], startingAt: 0, endingBefore: startLocation) {
+            EntrySelectionCoordinator.shared.selectFindResult(cellID: result.cellID, range: result.range)
+            return
+        }
+
+        errorMessage = "Could not find \"\(trimmedQuery)\"."
+    }
+
     private func compareDates(_ lhs: Date, _ rhs: Date) -> ComparisonResult {
         if lhs < rhs {
             return .orderedAscending
@@ -361,6 +406,52 @@ final class EntryListModel: ObservableObject {
             return .orderedDescending
         }
         return .orderedSame
+    }
+
+    private func searchableCells() -> [SearchableCell] {
+        visibleEntries.flatMap { entry in
+            columnsBeforeEntry.map { column in
+                SearchableCell(
+                    id: .column(entryID: entry.id, columnID: column.id),
+                    text: columnValue(entryID: entry.id, columnID: column.id).text
+                )
+            }
+            + [SearchableCell(id: .entry(entry.id), text: entry.body)]
+            + columnsAfterEntry.map { column in
+                SearchableCell(
+                    id: .column(entryID: entry.id, columnID: column.id),
+                    text: columnValue(entryID: entry.id, columnID: column.id).text
+                )
+            }
+        }
+    }
+
+    private func find(
+        _ query: String,
+        in cells: ArraySlice<SearchableCell>,
+        startingAt startLocation: Int
+    ) -> FindResult? {
+        for cell in cells {
+            if let result = find(query, in: cell, startingAt: startLocation) {
+                return result
+            }
+        }
+        return nil
+    }
+
+    private func find(
+        _ query: String,
+        in cell: SearchableCell,
+        startingAt startLocation: Int,
+        endingBefore endLocation: Int? = nil
+    ) -> FindResult? {
+        let nsText = cell.text as NSString
+        let safeStart = min(max(startLocation, 0), nsText.length)
+        let safeEnd = min(max(endLocation ?? nsText.length, safeStart), nsText.length)
+        let searchRange = NSRange(location: safeStart, length: safeEnd - safeStart)
+        let range = nsText.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: searchRange)
+        guard range.location != NSNotFound else { return nil }
+        return FindResult(cellID: cell.id, range: range)
     }
 
     private func compareEntryBodies(_ lhs: Entry, _ rhs: Entry) -> ComparisonResult {
@@ -657,4 +748,14 @@ private let recentLibrariesPreferenceKey = "StructureRecentLibraryURLs"
 enum ColumnDropPlacement {
     case before
     case after
+}
+
+private struct SearchableCell {
+    let id: StructureCellID
+    let text: String
+}
+
+private struct FindResult {
+    let cellID: StructureCellID
+    let range: NSRange
 }

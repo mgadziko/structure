@@ -2,6 +2,17 @@ import AppKit
 
 extension Notification.Name {
     static let entryTextSelectionChanged = Notification.Name("StructureEntryTextSelectionChanged")
+    static let entryFindResultSelected = Notification.Name("StructureEntryFindResultSelected")
+}
+
+final class FindResultFocusRequest {
+    let cellID: StructureCellID
+    let range: NSRange
+
+    init(cellID: StructureCellID, range: NSRange) {
+        self.cellID = cellID
+        self.range = range
+    }
 }
 
 final class EntrySelectionCoordinator {
@@ -79,6 +90,30 @@ final class EntrySelectionCoordinator {
 
         focusAndPlaceInsertionPoint(in: targetTextView)
         return true
+    }
+
+    func currentFindAnchor() -> FindAnchor? {
+        guard
+            let activeTextView,
+            let cellID = cellIDsByTextViewID[ObjectIdentifier(activeTextView)]
+        else { return nil }
+
+        return FindAnchor(cellID: cellID, selectedRange: activeTextView.selectedRange())
+    }
+
+    func selectFindResult(cellID: StructureCellID, range: NSRange, notifyScroll: Bool = true) {
+        guard let textView = cellTextViews[cellID]?.textView else { return }
+        focusTextView(textView)
+        textView.window?.makeFirstResponder(textView)
+        textView.setSelectedRange(range)
+        textView.scrollRangeToVisible(range)
+        notifyTextSelectionChanged(in: textView)
+        if notifyScroll {
+            NotificationCenter.default.post(
+                name: .entryFindResultSelected,
+                object: FindResultFocusRequest(cellID: cellID, range: range)
+            )
+        }
     }
 
     func focusTextView(_ textView: NSTextView) {
@@ -164,6 +199,11 @@ enum StructureCellID: Hashable {
             return entryID
         }
     }
+}
+
+struct FindAnchor {
+    let cellID: StructureCellID
+    let selectedRange: NSRange
 }
 
 private final class WeakTextView {

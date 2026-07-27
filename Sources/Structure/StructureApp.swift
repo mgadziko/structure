@@ -65,6 +65,25 @@ func openViewSelectionPanel(for model: EntryListModel) {
     }
 }
 
+@MainActor
+func findPanel(for model: EntryListModel) {
+    let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+    input.stringValue = model.findText
+    input.placeholderString = "Find"
+
+    let alert = NSAlert()
+    alert.messageText = "Find"
+    alert.informativeText = "Search the current View from the current cursor position."
+    alert.accessoryView = input
+    alert.addButton(withTitle: "Find Next")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = input
+
+    if alert.runModal() == .alertFirstButtonReturn {
+        model.findNext(input.stringValue)
+    }
+}
+
 private final class ViewSelectionController: NSObject, NSTableViewDataSource, NSTableViewDelegate {
     let views: [StructureView]
     let scrollView: NSScrollView
@@ -125,6 +144,14 @@ struct StructureApp: App {
                 .background(WindowTitleSetter(title: model.windowTitle))
         }
         .commands {
+            CommandGroup(after: .pasteboard) {
+                Button("Find") {
+                    findPanel(for: model)
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+            }
+
             CommandGroup(replacing: .newItem) {
                 Button("New Library") {
                     newLibraryPanel(for: model)

@@ -52,6 +52,37 @@ for iconFile in iconFiles {
         path.fill()
     }
 
+    let yellowCircle = NSBezierPath(ovalIn: NSRect(
+        x: circles[1].center.x - circleDiameter / 2,
+        y: circles[1].center.y - circleDiameter / 2,
+        width: circleDiameter,
+        height: circleDiameter
+    ))
+    let blueCircle = NSBezierPath(ovalIn: NSRect(
+        x: circles[2].center.x - circleDiameter / 2,
+        y: circles[2].center.y - circleDiameter / 2,
+        width: circleDiameter,
+        height: circleDiameter
+    ))
+    NSGraphicsContext.saveGraphicsState()
+    yellowCircle.addClip()
+    NSColor(calibratedRed: 0.10, green: 0.68, blue: 0.25, alpha: 0.76).setFill()
+    blueCircle.fill()
+    NSGraphicsContext.restoreGraphicsState()
+
+    let redCircle = NSBezierPath(ovalIn: NSRect(
+        x: circles[0].center.x - circleDiameter / 2,
+        y: circles[0].center.y - circleDiameter / 2,
+        width: circleDiameter,
+        height: circleDiameter
+    ))
+    NSGraphicsContext.saveGraphicsState()
+    redCircle.addClip()
+    yellowCircle.addClip()
+    NSColor.black.withAlphaComponent(0.82).setFill()
+    blueCircle.fill()
+    NSGraphicsContext.restoreGraphicsState()
+
     for circle in circles {
         let rect = NSRect(
             x: circle.center.x - circleDiameter / 2,
