@@ -3,6 +3,11 @@ import Foundation
 
 final class EntryStore {
     private var db: OpaquePointer?
+    static var defaultDatabaseURL: URL {
+        get throws {
+            try databaseURL()
+        }
+    }
 
     convenience init() throws {
         try self.init(databaseURL: Self.databaseURL())
@@ -62,6 +67,104 @@ final class EntryStore {
         return entries
     }
 
+    func loadDefaultView() throws -> StructureView {
+        try ensureDefaultViewExists()
+        guard let view = try loadView(id: StructureView.defaultID) else {
+            throw StructureError.sqlite("Default view was not available.")
+        }
+        return view
+    }
+
+    func loadViews() throws -> [StructureView] {
+        let sql = """
+        SELECT id, title, sort_column_kind, sort_column_id, sort_direction, shows_created_column, created_at, updated_at
+        FROM structure_views
+        WHERE deleted_at IS NULL
+        ORDER BY title COLLATE NOCASE ASC, created_at ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var views: [StructureView] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            views.append(view(from: statement))
+        }
+
+        return views
+    }
+
+    func loadView(id: StructureView.ID) throws -> StructureView? {
+        let sql = """
+        SELECT id, title, sort_column_kind, sort_column_id, sort_direction, shows_created_column, created_at, updated_at
+        FROM structure_views
+        WHERE id = ? AND deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else {
+            return nil
+        }
+
+        return view(from: statement)
+    }
+
+    func insertView(_ view: StructureView) throws {
+        let sql = """
+        INSERT INTO structure_views (
+            id, title, sort_column_kind, sort_column_id, sort_direction, shows_created_column, created_at, updated_at, deleted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL);
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        bindView(view, to: statement)
+        try step(statement)
+    }
+
+    func updateViewTitle(viewID: StructureView.ID, title: String, updatedAt: Date = Date()) throws {
+        let sql = """
+        UPDATE structure_views
+        SET title = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, viewID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    func loadAllColumnNames() throws -> [String] {
+        let sql = """
+        SELECT DISTINCT title
+        FROM entry_columns
+        WHERE deleted_at IS NULL
+        ORDER BY title COLLATE NOCASE ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var names: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let titleText = sqlite3_column_text(statement, 0) else { continue }
+            names.append(String(cString: titleText))
+        }
+
+        return names
+    }
+
     func insert(_ entry: Entry) throws {
         let sql = """
         INSERT INTO entries (id, body_plain_text, body_rtf, created_at, updated_at, captured_at, deleted_at)
@@ -109,31 +212,37 @@ final class EntryStore {
         try step(statement)
     }
 
-    func loadColumns() throws -> [EntryColumn] {
+    func loadColumns(viewID: StructureView.ID = StructureView.defaultID) throws -> [EntryColumn] {
         let sql = """
-        SELECT id, title, placement, order_index, width
+        SELECT id, view_id, title, placement, order_index, width, definition_kind
         FROM entry_columns
-        WHERE deleted_at IS NULL
+        WHERE view_id = ? AND deleted_at IS NULL
         ORDER BY order_index ASC, created_at ASC;
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         defer { sqlite3_finalize(statement) }
 
+        sqlite3_bind_text(statement, 1, viewID, -1, SQLITE_TRANSIENT)
+
         var columns: [EntryColumn] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard
                 let idText = sqlite3_column_text(statement, 0),
-                let titleText = sqlite3_column_text(statement, 1),
-                let placementText = sqlite3_column_text(statement, 2)
+                let viewIDText = sqlite3_column_text(statement, 1),
+                let titleText = sqlite3_column_text(statement, 2),
+                let placementText = sqlite3_column_text(statement, 3)
             else { continue }
 
+            let definitionText = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
             columns.append(EntryColumn(
                 id: String(cString: idText),
+                viewID: String(cString: viewIDText),
                 title: String(cString: titleText),
                 placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
-                orderIndex: Int(sqlite3_column_int(statement, 3)),
-                width: sqlite3_column_double(statement, 4)
+                orderIndex: Int(sqlite3_column_int(statement, 4)),
+                width: sqlite3_column_double(statement, 5),
+                definition: EntryColumnDefinition(rawValue: definitionText) ?? .none
             ))
         }
 
@@ -142,20 +251,45 @@ final class EntryStore {
 
     func insertColumn(_ column: EntryColumn, createdAt: Date = Date()) throws {
         let sql = """
-        INSERT INTO entry_columns (id, title, placement, order_index, width, created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NULL);
+        INSERT INTO entry_columns (id, view_id, title, placement, order_index, width, definition_kind, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, column.id, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(statement, 2, column.title, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(statement, 3, column.placement.rawValue, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(statement, 4, Int32(column.orderIndex))
-        sqlite3_bind_double(statement, 5, column.width)
-        sqlite3_bind_double(statement, 6, createdAt.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 7, createdAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 2, column.viewID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, column.title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, column.placement.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 5, Int32(column.orderIndex))
+        sqlite3_bind_double(statement, 6, column.width)
+        sqlite3_bind_text(statement, 7, column.definition.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 8, createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 9, createdAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    func updateViewSort(viewID: StructureView.ID, sort: EntrySort, updatedAt: Date = Date()) throws {
+        let sql = """
+        UPDATE structure_views
+        SET sort_column_kind = ?, sort_column_id = ?, sort_direction = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, sort.column?.storageKind, -1, SQLITE_TRANSIENT)
+        if let columnID = sort.column?.storageColumnID {
+            sqlite3_bind_text(statement, 2, columnID, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(statement, 2)
+        }
+        sqlite3_bind_text(statement, 3, sort.direction.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 4, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 5, viewID, -1, SQLITE_TRANSIENT)
 
         try step(statement)
     }
@@ -171,6 +305,23 @@ final class EntryStore {
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_double(statement, 1, width)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, columnID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    func updateColumnTitle(columnID: EntryColumn.ID, title: String, updatedAt: Date = Date()) throws {
+        let sql = """
+        UPDATE entry_columns
+        SET title = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, title, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
         sqlite3_bind_text(statement, 3, columnID, -1, SQLITE_TRANSIENT)
 
@@ -272,23 +423,51 @@ final class EntryStore {
             try execute("ALTER TABLE entries ADD COLUMN body_rtf BLOB;")
         }
         try execute("""
-        CREATE TABLE IF NOT EXISTS entry_columns (
+        CREATE TABLE IF NOT EXISTS structure_views (
             id TEXT PRIMARY KEY NOT NULL,
             title TEXT NOT NULL,
-            placement TEXT NOT NULL,
-            order_index INTEGER NOT NULL,
-            width REAL NOT NULL DEFAULT 120,
+            sort_column_kind TEXT,
+            sort_column_id TEXT,
+            sort_direction TEXT NOT NULL DEFAULT 'ascending',
+            shows_created_column INTEGER NOT NULL DEFAULT 1,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             deleted_at REAL
         );
         """)
+        if try !columnExists("shows_created_column", in: "structure_views") {
+            try execute("ALTER TABLE structure_views ADD COLUMN shows_created_column INTEGER NOT NULL DEFAULT 1;")
+        }
+        try execute("""
+        CREATE TABLE IF NOT EXISTS entry_columns (
+            id TEXT PRIMARY KEY NOT NULL,
+            view_id TEXT NOT NULL DEFAULT 'default',
+            title TEXT NOT NULL,
+            placement TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            width REAL NOT NULL DEFAULT 120,
+            definition_kind TEXT NOT NULL DEFAULT 'none',
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            FOREIGN KEY (view_id) REFERENCES structure_views(id) ON DELETE CASCADE
+        );
+        """)
+        try ensureDefaultViewExists()
+        if try !columnExists("view_id", in: "entry_columns") {
+            try execute("ALTER TABLE entry_columns ADD COLUMN view_id TEXT NOT NULL DEFAULT 'default';")
+        }
         if try !columnExists("width", in: "entry_columns") {
             try execute("ALTER TABLE entry_columns ADD COLUMN width REAL NOT NULL DEFAULT 120;")
         }
+        if try !columnExists("definition_kind", in: "entry_columns") {
+            try execute("ALTER TABLE entry_columns ADD COLUMN definition_kind TEXT NOT NULL DEFAULT 'none';")
+        }
+        try execute("UPDATE entry_columns SET view_id = 'default' WHERE view_id IS NULL OR view_id = '';")
+        try execute("UPDATE entry_columns SET definition_kind = 'none' WHERE definition_kind IS NULL OR definition_kind = '';")
         try execute("""
         CREATE INDEX IF NOT EXISTS idx_entry_columns_order
-        ON entry_columns (deleted_at, order_index, created_at);
+        ON entry_columns (view_id, deleted_at, order_index, created_at);
         """)
         try execute("""
         CREATE TABLE IF NOT EXISTS entry_column_values (
@@ -302,6 +481,60 @@ final class EntryStore {
             FOREIGN KEY (column_id) REFERENCES entry_columns(id) ON DELETE CASCADE
         );
         """)
+    }
+
+    private func ensureDefaultViewExists() throws {
+        let now = Date().timeIntervalSince1970
+        let sql = """
+        INSERT INTO structure_views (
+            id, title, sort_column_kind, sort_column_id, sort_direction, shows_created_column, created_at, updated_at, deleted_at
+        )
+        VALUES ('default', 'All Entries', 'created', NULL, 'ascending', 1, ?, ?, NULL)
+        ON CONFLICT(id) DO NOTHING;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, now)
+        sqlite3_bind_double(statement, 2, now)
+
+        try step(statement)
+    }
+
+    private func view(from statement: OpaquePointer?) -> StructureView {
+        let idText = sqlite3_column_text(statement, 0)!
+        let titleText = sqlite3_column_text(statement, 1)!
+        let sortKind = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+        let sortColumnID = sqlite3_column_text(statement, 3).map { String(cString: $0) }
+        let sortDirection = sqlite3_column_text(statement, 4).map { String(cString: $0) }
+
+        return StructureView(
+            id: String(cString: idText),
+            title: String(cString: titleText),
+            sort: EntrySort(
+                column: EntrySortColumn(kind: sortKind, columnID: sortColumnID),
+                direction: EntrySortDirection(rawValue: sortDirection)
+            ),
+            showsCreatedColumn: sqlite3_column_int(statement, 5) != 0,
+            createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
+            updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))
+        )
+    }
+
+    private func bindView(_ view: StructureView, to statement: OpaquePointer?) {
+        sqlite3_bind_text(statement, 1, view.id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, view.title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, view.sort.column?.storageKind, -1, SQLITE_TRANSIENT)
+        if let columnID = view.sort.column?.storageColumnID {
+            sqlite3_bind_text(statement, 4, columnID, -1, SQLITE_TRANSIENT)
+        } else {
+            sqlite3_bind_null(statement, 4)
+        }
+        sqlite3_bind_text(statement, 5, view.sort.direction.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 6, view.showsCreatedColumn ? 1 : 0)
+        sqlite3_bind_double(statement, 7, view.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 8, view.updatedAt.timeIntervalSince1970)
     }
 
     private func bindRichText(_ data: Data?, to statement: OpaquePointer?, at index: Int32) {

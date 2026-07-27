@@ -51,6 +51,75 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadColumns(), [column])
     }
 
+    func testDefaultViewSortRoundTrips() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        var expectedSort = EntrySort()
+        expectedSort.select(.body)
+
+        try store.updateViewSort(viewID: StructureView.defaultID, sort: expectedSort, updatedAt: Date(timeIntervalSince1970: 10))
+
+        let view = try store.loadDefaultView()
+        XCTAssertEqual(view.id, StructureView.defaultID)
+        XCTAssertEqual(view.sort, expectedSort)
+    }
+
+    func testViewsRoundTripWithCreatedColumnPreference() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "New View 1",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        try store.insertView(view)
+
+        let loaded = try XCTUnwrap(try store.loadView(id: view.id))
+        XCTAssertEqual(loaded, view)
+        XCTAssertTrue(try store.loadViews().contains(view))
+    }
+
+    func testViewTitleUpdatesRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "Original",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        try store.insertView(view)
+        try store.updateViewTitle(viewID: view.id, title: "Renamed", updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadView(id: view.id)?.title, "Renamed")
+    }
+
+    func testLegacyColumnsAttachToDefaultViewWithNoDefinition() throws {
+        let databaseURL = try temporaryDatabaseURL()
+        try createLegacyColumnDatabase(at: databaseURL)
+
+        let store = try EntryStore(databaseURL: databaseURL)
+        let columns = try store.loadColumns()
+
+        XCTAssertEqual(columns, [
+            EntryColumn(
+                id: "legacy-column",
+                viewID: StructureView.defaultID,
+                title: "Legacy",
+                placement: .afterEntry,
+                orderIndex: 0,
+                width: 120,
+                definition: .none
+            )
+        ])
+    }
+
     func testColumnOrderUpdatesRoundTrip() throws {
         let store = try EntryStore(databaseURL: temporaryDatabaseURL())
         let timestamp = Date(timeIntervalSince1970: 10)
@@ -96,6 +165,24 @@ final class EntryStoreTests: XCTestCase {
         try store.updateColumnWidth(columnID: column.id, width: 240, updatedAt: timestamp)
 
         column.width = 240
+        XCTAssertEqual(try store.loadColumns(), [column])
+    }
+
+    func testColumnTitleUpdatesRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        var column = EntryColumn(
+            id: "column-1",
+            title: "Original",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 120
+        )
+
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.updateColumnTitle(columnID: column.id, title: "Renamed", updatedAt: timestamp)
+
+        column.title = "Renamed"
         XCTAssertEqual(try store.loadColumns(), [column])
     }
 
@@ -158,6 +245,40 @@ final class EntryStoreTests: XCTestCase {
         try execute("""
         INSERT INTO entries (id, body_plain_text, created_at, updated_at, captured_at, deleted_at)
         VALUES ('legacy-1', 'Legacy plain text', 1, 1, 1, NULL);
+        """, db: db)
+    }
+
+    private func createLegacyColumnDatabase(at url: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        try execute("""
+        CREATE TABLE entries (
+            id TEXT PRIMARY KEY NOT NULL,
+            body_plain_text TEXT NOT NULL,
+            body_rtf BLOB,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            captured_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """, db: db)
+        try execute("""
+        CREATE TABLE entry_columns (
+            id TEXT PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            placement TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            width REAL NOT NULL DEFAULT 120,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """, db: db)
+        try execute("""
+        INSERT INTO entry_columns (id, title, placement, order_index, width, created_at, updated_at, deleted_at)
+        VALUES ('legacy-column', 'Legacy', 'after_entry', 0, 120, 1, 1, NULL);
         """, db: db)
     }
 

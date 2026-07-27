@@ -7,6 +7,8 @@ struct RichTextEntryEditor: NSViewRepresentable {
     @Binding var richTextData: Data?
     @Binding var height: CGFloat
     var focusedEntryID: FocusState<Entry.ID?>.Binding
+    let onBeginEditing: () -> Void
+    let onEndEditing: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
@@ -82,7 +84,12 @@ struct RichTextEntryEditor: NSViewRepresentable {
             if let textView = notification.object as? NSTextView {
                 EntrySelectionCoordinator.shared.focus(textView)
             }
+            parent.onBeginEditing()
             parent.focusedEntryID.wrappedValue = parent.entryID
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            parent.onEndEditing()
         }
 
         func textDidChange(_ notification: Notification) {

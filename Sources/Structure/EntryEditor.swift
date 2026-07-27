@@ -5,36 +5,46 @@ struct EntryEditor: View {
     let entry: Entry
     @Binding var text: String
     @Binding var richTextData: Data?
+    let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
     let columnValue: (Entry.ID, EntryColumn.ID) -> String
     let saveColumnValueDraft: (Entry.ID, EntryColumn.ID, String) -> Void
     let updateColumnValue: (Entry.ID, EntryColumn.ID, String) -> Void
-    let requestEntryVisibility: (Entry.ID) -> Void
+    let beginEntryEditing: (Entry.ID) -> Void
+    let endEntryEditing: (Entry.ID) -> Void
+    let beginColumnEditing: (Entry.ID, EntryColumn.ID) -> Void
+    let endColumnEditing: (Entry.ID, EntryColumn.ID) -> Void
     var focusedEntryID: FocusState<Entry.ID?>.Binding
     @State private var editorHeight: CGFloat = 22
 
     var body: some View {
         HStack(alignment: .top, spacing: 18) {
-            Text(entry.displayDate)
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(.secondary)
-                .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
-                .padding(.top, 8)
+            if showCreatedColumn {
+                Text(entry.displayDate)
+                    .font(.system(size: 12, weight: .regular))
+                    .foregroundStyle(.secondary)
+                    .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
+                    .padding(.top, 8)
+            }
 
             ForEach(columnsBeforeEntry) { column in
                 UndefinedColumnCell(
                     value: columnValue(entry.id, column.id),
                     columnTitle: column.title,
                     width: column.width,
+                    rowHeight: editorHeight,
                     saveDraft: { value in
                         saveColumnValueDraft(entry.id, column.id, value)
                     },
                     commit: { value in
                         updateColumnValue(entry.id, column.id, value)
                     },
-                    onFocus: {
-                        requestEntryVisibility(entry.id)
+                    beginEditing: {
+                        beginColumnEditing(entry.id, column.id)
+                    },
+                    endEditing: {
+                        endColumnEditing(entry.id, column.id)
                     }
                 )
             }
@@ -47,7 +57,13 @@ struct EntryEditor: View {
                     body: $text,
                     richTextData: $richTextData,
                     height: $editorHeight,
-                    focusedEntryID: focusedEntryID
+                    focusedEntryID: focusedEntryID,
+                    onBeginEditing: {
+                        beginEntryEditing(entry.id)
+                    },
+                    onEndEditing: {
+                        endEntryEditing(entry.id)
+                    }
                 )
                     .frame(height: editorHeight)
                     .accessibilityLabel("Entry created \(entry.displayDate)")
@@ -61,14 +77,18 @@ struct EntryEditor: View {
                     value: columnValue(entry.id, column.id),
                     columnTitle: column.title,
                     width: column.width,
+                    rowHeight: editorHeight,
                     saveDraft: { value in
                         saveColumnValueDraft(entry.id, column.id, value)
                     },
                     commit: { value in
                         updateColumnValue(entry.id, column.id, value)
                     },
-                    onFocus: {
-                        requestEntryVisibility(entry.id)
+                    beginEditing: {
+                        beginColumnEditing(entry.id, column.id)
+                    },
+                    endEditing: {
+                        endColumnEditing(entry.id, column.id)
                     }
                 )
             }
@@ -90,29 +110,47 @@ private struct UndefinedColumnCell: View {
     let value: String
     let columnTitle: String
     let width: Double
+    let rowHeight: CGFloat
     let saveDraft: (String) -> Void
     let commit: (String) -> Void
-    let onFocus: () -> Void
+    let beginEditing: () -> Void
+    let endEditing: () -> Void
     @State private var draft = ""
     @State private var cellHeight: CGFloat = 24
 
+    private var displayHeight: CGFloat {
+        max(cellHeight, rowHeight)
+    }
+
     var body: some View {
-        ExpandingColumnTextEditor(
-            text: $draft,
-            height: $cellHeight,
-            width: width,
-            placeholder: "...",
-            onDraftChange: saveDraft,
-            onCommit: commit,
-            onFocus: onFocus
-        )
+        ZStack(alignment: .topLeading) {
+            ExpandingColumnTextEditor(
+                text: $draft,
+                height: $cellHeight,
+                width: width,
+                displayHeight: displayHeight,
+                onDraftChange: saveDraft,
+                onCommit: commit,
+                onBeginEditing: beginEditing,
+                onEndEditing: endEditing
+            )
+
+            if draft.isEmpty {
+                Text("...")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.tertiary)
+                    .padding(.leading, 6)
+                    .padding(.top, 3)
+                    .allowsHitTesting(false)
+            }
+        }
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.22))
             .overlay(
                 RoundedRectangle(cornerRadius: 3)
                     .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
             )
             .accessibilityLabel("\(columnTitle) value")
-            .frame(width: width, height: cellHeight, alignment: .topLeading)
+            .frame(width: width, height: displayHeight, alignment: .topLeading)
             .onAppear {
                 draft = value
             }
@@ -126,13 +164,14 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
     let width: Double
-    let placeholder: String
+    let displayHeight: CGFloat
     let onDraftChange: (String) -> Void
     let onCommit: (String) -> Void
-    let onFocus: () -> Void
+    let onBeginEditing: () -> Void
+    let onEndEditing: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSScrollView()
+        let scrollView = ColumnCellScrollView()
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
@@ -169,11 +208,11 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
 
         context.coordinator.textView = textView
-        context.coordinator.placeholderString = placeholder
         context.coordinator.applyText(text)
         context.coordinator.updateHeight()
 
         scrollView.documentView = textView
+        scrollView.textView = textView
         return scrollView
     }
 
@@ -194,7 +233,6 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ExpandingColumnTextEditor
         weak var textView: NSTextView?
-        var placeholderString = "..."
         var isEditing = false
 
         init(parent: ExpandingColumnTextEditor) {
@@ -203,11 +241,7 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
 
         func textDidBeginEditing(_ notification: Notification) {
             isEditing = true
-            parent.onFocus()
-            if textView?.string == placeholderString {
-                textView?.string = ""
-                textView?.textColor = .labelColor
-            }
+            parent.onBeginEditing()
         }
 
         func textDidChange(_ notification: Notification) {
@@ -220,18 +254,14 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
         func textDidEndEditing(_ notification: Notification) {
             isEditing = false
             parent.onCommit(parent.text)
+            parent.onEndEditing()
             applyText(parent.text)
         }
 
         func applyText(_ text: String) {
             guard let textView else { return }
-            if text.isEmpty, !isEditing {
-                textView.string = placeholderString
-                textView.textColor = .tertiaryLabelColor
-            } else {
-                textView.string = text
-                textView.textColor = .labelColor
-            }
+            textView.string = text
+            textView.textColor = .labelColor
             updateHeight()
         }
 
@@ -270,9 +300,20 @@ private struct ExpandingColumnTextEditor: NSViewRepresentable {
                 x: 0,
                 y: 0,
                 width: parent.width,
-                height: measuredHeight
+                height: max(measuredHeight, parent.displayHeight)
             )
         }
+    }
+}
+
+private final class ColumnCellScrollView: NSScrollView {
+    weak var textView: NSTextView?
+
+    override func mouseDown(with event: NSEvent) {
+        if let textView {
+            window?.makeFirstResponder(textView)
+        }
+        super.mouseDown(with: event)
     }
 }
 

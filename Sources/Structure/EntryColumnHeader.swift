@@ -5,11 +5,15 @@ import UniformTypeIdentifiers
 struct EntryColumnHeader: View {
     let sort: EntrySort
     let sortBy: (EntrySortColumn) -> Void
+    let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
+    let availableColumnNames: [String]
     let addColumn: (String, EntryColumnPlacement) -> Void
-    let moveColumn: (EntryColumn.ID, EntryColumn.ID) -> Void
+    let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
+    let renameColumn: (EntryColumn.ID, String) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
+    let beginHeaderEditing: () -> Void
     @State private var draftColumnPlacement: EntryColumnPlacement?
     @State private var draftColumnTitle = ""
     @State private var draggedColumnID: EntryColumn.ID?
@@ -17,19 +21,29 @@ struct EntryColumnHeader: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 18) {
-            SortHeaderButton(
-                title: "Created",
-                column: .created,
-                sort: sort,
-                action: sortBy
-            )
-            .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
+            if showCreatedColumn {
+                SortHeaderButton(
+                    title: "Created",
+                    column: .created,
+                    sort: sort,
+                    action: { column in
+                        beginHeaderEditing()
+                        sortBy(column)
+                    }
+                )
+                .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
+            }
 
             ForEach(columnsBeforeEntry) { column in
                 UndefinedColumnHeader(
                     column: column,
                     sort: sort,
-                    action: sortBy,
+                    action: { column in
+                        beginHeaderEditing()
+                        sortBy(column)
+                    },
+                    renameColumn: renameColumn,
+                    beginHeaderEditing: beginHeaderEditing,
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn
@@ -42,7 +56,10 @@ struct EntryColumnHeader: View {
                 title: "Entry",
                 column: .body,
                 sort: sort,
-                action: sortBy
+                action: { column in
+                    beginHeaderEditing()
+                    sortBy(column)
+                }
             )
             .frame(width: EntryRowLayout.entryColumnWidth, alignment: .leading)
 
@@ -52,7 +69,12 @@ struct EntryColumnHeader: View {
                 UndefinedColumnHeader(
                     column: column,
                     sort: sort,
-                    action: sortBy,
+                    action: { column in
+                        beginHeaderEditing()
+                        sortBy(column)
+                    },
+                    renameColumn: renameColumn,
+                    beginHeaderEditing: beginHeaderEditing,
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn
@@ -70,20 +92,21 @@ struct EntryColumnHeader: View {
     @ViewBuilder
     private func columnCreationControl(for placement: EntryColumnPlacement) -> some View {
         if draftColumnPlacement == placement {
-            TextField("Column", text: $draftColumnTitle)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(.blue)
-                .frame(width: EntryRowLayout.defaultUndefinedColumnWidth, alignment: .leading)
-                .focused($draftIsFocused)
-                .onSubmit {
-                    commitDraftColumn()
-                }
-                .onAppear {
+            ColumnNameComboBox(
+                values: availableColumnNames,
+                text: $draftColumnTitle,
+                onCommit: commitDraftColumn
+            )
+            .frame(width: EntryRowLayout.defaultUndefinedColumnWidth, height: 24, alignment: .leading)
+            .focused($draftIsFocused)
+            .onAppear {
+                DispatchQueue.main.async {
                     draftIsFocused = true
                 }
+            }
         } else {
             Button {
+                beginHeaderEditing()
                 draftColumnPlacement = placement
                 draftColumnTitle = ""
             } label: {
@@ -106,15 +129,88 @@ struct EntryColumnHeader: View {
     }
 }
 
+private struct ColumnNameComboBox: NSViewRepresentable {
+    let values: [String]
+    @Binding var text: String
+    let onCommit: () -> Void
+
+    func makeNSView(context: Context) -> NSComboBox {
+        let comboBox = NSComboBox()
+        comboBox.usesDataSource = false
+        comboBox.addItems(withObjectValues: values)
+        comboBox.completes = true
+        comboBox.numberOfVisibleItems = min(max(values.count, 1), 12)
+        comboBox.stringValue = text
+        comboBox.delegate = context.coordinator
+        return comboBox
+    }
+
+    func updateNSView(_ comboBox: NSComboBox, context: Context) {
+        let existingItems = (0..<comboBox.numberOfItems).compactMap { comboBox.itemObjectValue(at: $0) as? String }
+        if existingItems != values {
+            comboBox.removeAllItems()
+            comboBox.addItems(withObjectValues: values)
+            comboBox.numberOfVisibleItems = min(max(values.count, 1), 12)
+        }
+        if comboBox.stringValue != text {
+            comboBox.stringValue = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onCommit: onCommit)
+    }
+
+    final class Coordinator: NSObject, NSComboBoxDelegate {
+        @Binding var text: String
+        let onCommit: () -> Void
+
+        init(text: Binding<String>, onCommit: @escaping () -> Void) {
+            _text = text
+            self.onCommit = onCommit
+        }
+
+        func comboBoxSelectionDidChange(_ notification: Notification) {
+            guard let comboBox = notification.object as? NSComboBox else { return }
+            text = comboBox.stringValue
+            onCommit()
+        }
+
+        func controlTextDidEndEditing(_ notification: Notification) {
+            guard let comboBox = notification.object as? NSComboBox else { return }
+            text = comboBox.stringValue
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let comboBox = notification.object as? NSComboBox else { return }
+            text = comboBox.stringValue
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                text = control.stringValue
+                onCommit()
+                return true
+            }
+            return false
+        }
+    }
+}
+
 private struct UndefinedColumnHeader: View {
     let column: EntryColumn
     let sort: EntrySort
     let action: (EntrySortColumn) -> Void
+    let renameColumn: (EntryColumn.ID, String) -> Void
+    let beginHeaderEditing: () -> Void
     @Binding var draggedColumnID: EntryColumn.ID?
-    let moveColumn: (EntryColumn.ID, EntryColumn.ID) -> Void
+    let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
     @State private var dragStartWidth: Double?
     @State private var previewWidth: Double?
+    @State private var isEditingTitle = false
+    @State private var titleDraft = ""
+    @FocusState private var titleIsFocused: Bool
 
     private var displayWidth: Double {
         previewWidth ?? column.width
@@ -122,13 +218,8 @@ private struct UndefinedColumnHeader: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            SortHeaderButton(
-                title: column.title,
-                column: .userColumn(column.id),
-                sort: sort,
-                action: action
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
+            titleControl
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
 
             ZStack {
                 Color.clear
@@ -166,11 +257,67 @@ private struct UndefinedColumnHeader: View {
             of: [UTType.text],
             delegate: EntryColumnDropDelegate(
                 targetColumnID: column.id,
+                targetWidth: displayWidth,
                 draggedColumnID: $draggedColumnID,
                 moveColumn: moveColumn
             )
         )
-        .help("Drag heading to rearrange; drag right edge to resize")
+        .onChange(of: column.title) { newTitle in
+            if !isEditingTitle {
+                titleDraft = newTitle
+            }
+        }
+        .help("Click to sort; double-click heading to rename; drag heading to rearrange; drag right edge to resize")
+    }
+
+    @ViewBuilder
+    private var titleControl: some View {
+        if isEditingTitle {
+            TextField("Column", text: $titleDraft)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.blue)
+                .focused($titleIsFocused)
+                .onSubmit {
+                    commitTitle()
+                }
+                .onAppear {
+                    titleDraft = column.title
+                    DispatchQueue.main.async {
+                        titleIsFocused = true
+                    }
+                }
+                .onChange(of: titleIsFocused) { focused in
+                    if !focused {
+                        commitTitle()
+                    }
+                }
+        } else {
+            SortHeaderButton(
+                title: column.title,
+                column: .userColumn(column.id),
+                sort: sort,
+                action: action
+            )
+            .simultaneousGesture(
+                TapGesture(count: 2)
+                    .onEnded {
+                        beginHeaderEditing()
+                        titleDraft = column.title
+                        isEditingTitle = true
+                    }
+            )
+        }
+    }
+
+    private func commitTitle() {
+        let trimmedTitle = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedTitle.isEmpty {
+            renameColumn(column.id, trimmedTitle)
+        } else {
+            titleDraft = column.title
+        }
+        isEditingTitle = false
     }
 }
 
@@ -206,17 +353,22 @@ private final class ResizeCursorNSView: NSView {
 
 private struct EntryColumnDropDelegate: DropDelegate {
     let targetColumnID: EntryColumn.ID
+    let targetWidth: Double
     @Binding var draggedColumnID: EntryColumn.ID?
-    let moveColumn: (EntryColumn.ID, EntryColumn.ID) -> Void
+    let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
 
-    func dropEntered(info: DropInfo) {
-        guard let draggedColumnID, draggedColumnID != targetColumnID else { return }
-        moveColumn(draggedColumnID, targetColumnID)
-        self.draggedColumnID = targetColumnID
+    func validateDrop(info: DropInfo) -> Bool {
+        draggedColumnID != nil
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        draggedColumnID = nil
+        guard let draggedColumnID, draggedColumnID != targetColumnID else {
+            self.draggedColumnID = nil
+            return false
+        }
+        let placement: ColumnDropPlacement = info.location.x < targetWidth / 2 ? .before : .after
+        moveColumn(draggedColumnID, targetColumnID, placement)
+        self.draggedColumnID = nil
         return true
     }
 }

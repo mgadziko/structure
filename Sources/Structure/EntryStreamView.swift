@@ -6,30 +6,43 @@ struct EntryStreamView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            ViewNameBar(
+                title: model.activeViewTitle,
+                rename: model.renameActiveView,
+                beginEditing: clearEntryFocus
+            )
             FormattingBar()
             EntryColumnHeader(
                 sort: model.sort,
                 sortBy: model.sortBy,
+                showCreatedColumn: model.showCreatedColumn,
                 columnsBeforeEntry: model.columnsBeforeEntry,
                 columnsAfterEntry: model.columnsAfterEntry,
+                availableColumnNames: model.availableColumnNames,
                 addColumn: model.addColumn,
                 moveColumn: model.moveColumn,
-                resizeColumn: model.resizeColumn
+                renameColumn: model.renameColumn,
+                resizeColumn: model.resizeColumn,
+                beginHeaderEditing: clearEntryFocus
             )
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
-                        ForEach(model.sortedEntries) { entry in
+                        ForEach(model.visibleEntries) { entry in
                             EntryEditor(
                                 entry: entry,
                                 text: binding(for: entry.id),
                                 richTextData: richTextBinding(for: entry.id),
+                                showCreatedColumn: model.showCreatedColumn,
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
                                 columnValue: model.columnValue,
                                 saveColumnValueDraft: model.saveColumnValueDraft,
                                 updateColumnValue: model.updateColumnValue,
-                                requestEntryVisibility: model.requestEntryVisibility,
+                                beginEntryEditing: model.beginEntryEditing,
+                                endEntryEditing: model.endEntryEditing,
+                                beginColumnEditing: model.beginColumnEditing,
+                                endColumnEditing: model.endColumnEditing,
                                 focusedEntryID: $focusedEntryID
                             )
                             .id(entry.id)
@@ -107,5 +120,9 @@ struct EntryStreamView: View {
                 proxy.scrollTo(request.entryID, anchor: .center)
             }
         }
+    }
+
+    private func clearEntryFocus() {
+        focusedEntryID = nil
     }
 }
