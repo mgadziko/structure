@@ -15,6 +15,10 @@ let package = Package(
         .executableTarget(
             name: "Structure",
             dependencies: ["CSQLite"]
+        ),
+        .testTarget(
+            name: "StructureTests",
+            dependencies: ["Structure", "CSQLite"]
         )
     ]
 )

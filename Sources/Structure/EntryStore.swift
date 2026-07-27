@@ -4,9 +4,12 @@ import Foundation
 final class EntryStore {
     private var db: OpaquePointer?
 
-    init() throws {
-        let path = try Self.databaseURL()
-        try open(path: path.path)
+    convenience init() throws {
+        try self.init(databaseURL: Self.databaseURL())
+    }
+
+    init(databaseURL: URL) throws {
+        try open(path: databaseURL.path)
         try createSchema()
     }
 
@@ -106,6 +109,102 @@ final class EntryStore {
         try step(statement)
     }
 
+    func loadColumns() throws -> [EntryColumn] {
+        let sql = """
+        SELECT id, title, placement, order_index
+        FROM entry_columns
+        WHERE deleted_at IS NULL
+        ORDER BY order_index ASC, created_at ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var columns: [EntryColumn] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idText = sqlite3_column_text(statement, 0),
+                let titleText = sqlite3_column_text(statement, 1),
+                let placementText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            columns.append(EntryColumn(
+                id: String(cString: idText),
+                title: String(cString: titleText),
+                placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
+                orderIndex: Int(sqlite3_column_int(statement, 3))
+            ))
+        }
+
+        return columns
+    }
+
+    func insertColumn(_ column: EntryColumn, createdAt: Date = Date()) throws {
+        let sql = """
+        INSERT INTO entry_columns (id, title, placement, order_index, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL);
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, column.id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, column.title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, column.placement.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 4, Int32(column.orderIndex))
+        sqlite3_bind_double(statement, 5, createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, createdAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    func loadColumnValues() throws -> [EntryColumnValueKey: String] {
+        let sql = """
+        SELECT entry_id, column_id, value_text
+        FROM entry_column_values;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var values: [EntryColumnValueKey: String] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let entryIDText = sqlite3_column_text(statement, 0),
+                let columnIDText = sqlite3_column_text(statement, 1),
+                let valueText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            values[EntryColumnValueKey(
+                entryID: String(cString: entryIDText),
+                columnID: String(cString: columnIDText)
+            )] = String(cString: valueText)
+        }
+
+        return values
+    }
+
+    func upsertColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: String, updatedAt: Date = Date()) throws {
+        let sql = """
+        INSERT INTO entry_column_values (entry_id, column_id, value_text, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(entry_id, column_id) DO UPDATE SET
+            value_text = excluded.value_text,
+            updated_at = excluded.updated_at;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, entryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, columnID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, value, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 4, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
     private func open(path: String) throws {
         if sqlite3_open(path, &db) != SQLITE_OK {
             throw StructureError.sqlite(lastError)
@@ -133,6 +232,33 @@ final class EntryStore {
         if try !columnExists("body_rtf", in: "entries") {
             try execute("ALTER TABLE entries ADD COLUMN body_rtf BLOB;")
         }
+        try execute("""
+        CREATE TABLE IF NOT EXISTS entry_columns (
+            id TEXT PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            placement TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """)
+        try execute("""
+        CREATE INDEX IF NOT EXISTS idx_entry_columns_order
+        ON entry_columns (deleted_at, order_index, created_at);
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS entry_column_values (
+            entry_id TEXT NOT NULL,
+            column_id TEXT NOT NULL,
+            value_text TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY (entry_id, column_id),
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE,
+            FOREIGN KEY (column_id) REFERENCES entry_columns(id) ON DELETE CASCADE
+        );
+        """)
     }
 
     private func bindRichText(_ data: Data?, to statement: OpaquePointer?, at index: Int32) {

@@ -1,0 +1,120 @@
+import CSQLite
+import Foundation
+import XCTest
+@testable import Structure
+
+final class EntryStoreTests: XCTestCase {
+    func testRichTextDataRoundTripsWithPlainText() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let richTextData = Data("rtf payload".utf8)
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Hello Structure",
+            richTextData: richTextData,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+
+        try store.insert(entry)
+
+        let entries = try store.loadEntries()
+        XCTAssertEqual(entries, [entry])
+    }
+
+    func testLegacyDatabaseMigratesBodyRTFColumn() throws {
+        let databaseURL = try temporaryDatabaseURL()
+        try createLegacyDatabase(at: databaseURL)
+
+        let store = try EntryStore(databaseURL: databaseURL)
+        let entries = try store.loadEntries()
+
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertEqual(entries.first?.body, "Legacy plain text")
+        XCTAssertNil(entries.first?.richTextData)
+    }
+
+    func testColumnsRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let column = EntryColumn(
+            id: "column-1",
+            title: "Attribute",
+            placement: .afterEntry,
+            orderIndex: 3
+        )
+
+        try store.insertColumn(column, createdAt: Date(timeIntervalSince1970: 10))
+
+        XCTAssertEqual(try store.loadColumns(), [column])
+    }
+
+    func testColumnValuesRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Hello Structure",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let column = EntryColumn(
+            id: "column-1",
+            title: "Attribute",
+            placement: .afterEntry,
+            orderIndex: 0
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.upsertColumnValue(entryID: entry.id, columnID: column.id, value: "example", updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadColumnValues(), [
+            EntryColumnValueKey(entryID: entry.id, columnID: column.id): "example"
+        ])
+
+        try store.upsertColumnValue(entryID: entry.id, columnID: column.id, value: "updated", updatedAt: timestamp)
+        XCTAssertEqual(try store.loadColumnValues(), [
+            EntryColumnValueKey(entryID: entry.id, columnID: column.id): "updated"
+        ])
+    }
+
+    private func temporaryDatabaseURL() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory.appendingPathComponent("Structure.sqlite")
+    }
+
+    private func createLegacyDatabase(at url: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(url.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+
+        try execute("""
+        CREATE TABLE entries (
+            id TEXT PRIMARY KEY NOT NULL,
+            body_plain_text TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            captured_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """, db: db)
+        try execute("""
+        INSERT INTO entries (id, body_plain_text, created_at, updated_at, captured_at, deleted_at)
+        VALUES ('legacy-1', 'Legacy plain text', 1, 1, 1, NULL);
+        """, db: db)
+    }
+
+    private func execute(_ sql: String, db: OpaquePointer?) throws {
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown SQLite error"
+            XCTFail(message)
+        }
+    }
+}

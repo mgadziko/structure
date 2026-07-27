@@ -9,7 +9,10 @@ struct EntryStreamView: View {
             FormattingBar()
             EntryColumnHeader(
                 sort: model.sort,
-                sortBy: model.sortBy
+                sortBy: model.sortBy,
+                columnsBeforeEntry: model.columnsBeforeEntry,
+                columnsAfterEntry: model.columnsAfterEntry,
+                addColumn: model.addColumn
             )
             ScrollViewReader { proxy in
                 ScrollView {
@@ -19,12 +22,15 @@ struct EntryStreamView: View {
                                 entry: entry,
                                 text: binding(for: entry.id),
                                 richTextData: richTextBinding(for: entry.id),
+                                columnsBeforeEntry: model.columnsBeforeEntry,
+                                columnsAfterEntry: model.columnsAfterEntry,
+                                columnValueBinding: model.columnValueBinding,
                                 focusedEntryID: $focusedEntryID
                             )
                             .id(entry.id)
                         }
                     }
-                    .padding(.horizontal, 38)
+                    .padding(.horizontal, EntryRowLayout.horizontalPadding)
                     .padding(.vertical, 24)
                 }
                 .background(Color(nsColor: .textBackgroundColor))

@@ -178,7 +178,7 @@ When the user is working in a window and realizes that the current Entries share
 Example workflow:
 
 1. The window shows `Created` and `Entry` columns.
-2. The user clicks in the heading bar to the left or right of the `Entry` heading.
+2. The user clicks an add-column target to the left or right of the `Entry` heading.
 3. Structure creates a new column heading editor in place.
 4. The user types `Date`.
 5. The window now shows three columns: `Created`, `Entry`, and `Date`.
@@ -196,6 +196,9 @@ Design notes:
 - Basic formatting controls may include font size, typeface, bold, italics, underline, strikethrough, bullet list, and numbered list.
 - `Command-A` should first select all text in the current Entry. A second `Command-A` within a short interval should select all Entry text in the current column.
 - The initial capture View should have `Created` and `Entry` columns.
+- Prototype add-column controls may appear as small blue add targets next to the `Entry` heading.
+- Undefined columns should display visible editable cells so the user understands where column values can be entered.
+- Prototype undefined-column cell values may be session-only until View/column persistence is implemented.
 - Column headings should be visually distinct from Entry content. Blue headings are acceptable for the prototype.
 - Clicking a heading should sort by that column in ascending order by default. A second click should sort descending.
 - Entry text sorting should use natural numeric-aware ordering before ordinary alphabetical ordering.

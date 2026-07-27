@@ -7,6 +7,8 @@ final class EntryListModel: ObservableObject {
     @Published var currentEntryID: String?
     @Published var errorMessage: String?
     @Published var sort = EntrySort()
+    @Published var columns: [EntryColumn] = []
+    @Published private var columnValues: [EntryColumnValueKey: String] = [:]
 
     private let store: EntryStore
 
@@ -14,6 +16,8 @@ final class EntryListModel: ObservableObject {
         do {
             store = try EntryStore()
             entries = try store.loadEntries()
+            columns = try store.loadColumns()
+            columnValues = try store.loadColumnValues()
             if entries.isEmpty {
                 createEntry()
             } else {
@@ -82,6 +86,38 @@ final class EntryListModel: ObservableObject {
         sort.select(column)
     }
 
+    func addColumn(named title: String, placement: EntryColumnPlacement) {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return }
+        let column = EntryColumn(
+            id: UUID().uuidString,
+            title: trimmedTitle,
+            placement: placement,
+            orderIndex: columns.count
+        )
+        columns.append(column)
+        persistColumn(column)
+    }
+
+    var columnsBeforeEntry: [EntryColumn] {
+        columns.filter { $0.placement == .beforeEntry }
+    }
+
+    var columnsAfterEntry: [EntryColumn] {
+        columns.filter { $0.placement == .afterEntry }
+    }
+
+    func columnValueBinding(entryID: Entry.ID, columnID: EntryColumn.ID) -> Binding<String> {
+        let key = EntryColumnValueKey(entryID: entryID, columnID: columnID)
+        return Binding(
+            get: { self.columnValues[key] ?? "" },
+            set: { value in
+                self.columnValues[key] = value
+                self.persistColumnValue(entryID: entryID, columnID: columnID, value: value)
+            }
+        )
+    }
+
     private func compareDates(_ lhs: Date, _ rhs: Date) -> ComparisonResult {
         if lhs < rhs {
             return .orderedAscending
@@ -118,6 +154,24 @@ final class EntryListModel: ObservableObject {
     private func persistUpdate(_ entry: Entry) {
         do {
             try store.update(entry)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func persistColumn(_ column: EntryColumn) {
+        do {
+            try store.insertColumn(column)
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func persistColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: String) {
+        do {
+            try store.upsertColumnValue(entryID: entryID, columnID: columnID, value: value)
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
