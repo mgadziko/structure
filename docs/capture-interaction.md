@@ -183,12 +183,17 @@ Example workflow:
 
 This should feel like adding structure to the current View, not like defining a database table before capture. The user should be able to create the column at the moment the need becomes obvious.
 
+New columns should initially have no required definition. A column may later become associated with a Category, Attribute, computed value, or parser-backed field, but that definition should happen at the user's convenience. Creating the column should not force the user to decide what kind of structure it represents.
+
 Design notes:
 
 - The initial capture View may have only the `Entry` column.
 - Adding a column should preserve existing Entries.
-- The new column name may correspond to a Category, Attribute, computed value, or parser-backed field.
+- The new column should default to no definition rather than immediately becoming a Category or Attribute.
+- The new column name may later correspond to a Category, Attribute, computed value, or parser-backed field.
 - Parser-backed columns, such as `Date`, may auto-populate from Entry text when confidence is high enough.
 - Blank cells are acceptable and should not imply incomplete or invalid Entries.
 - The interaction should allow immediate naming and then immediate use.
 - Column creation should be reversible.
+- Assignments of information to labels should generally happen at the user's convenience, not merely because a column or Entry was created.
+- It remains an open question whether a View row is always defined by a single Entry, as in the remembered Lotus Agenda model, or whether later Views can present multiple Entries on one row.

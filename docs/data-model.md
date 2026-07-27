@@ -190,6 +190,8 @@ Purchase -> State: Wanted or Purchased
 
 The distinction matters because Type history and State history behave differently. If Apple is assigned Type Fruit, that should remain true unless the assignment was mistaken. If Apple is assigned State Fresh, that may later become Spoiled without implying the earlier Fresh state was a mistake.
 
+Dates should initially be modeled as descriptive Attributes rather than Categories. A Date narrows or describes an Entry; it should not automatically categorize the Entry as a reminder, meeting, due date, or pending task. Date Items may eventually have State Attributes such as Past, Present, or Pending, but those states should remain descriptive until the user or a rule explicitly adds more meaning. The definition of Present, such as whether it means today, is intentionally deferred.
+
 Fields:
 
 ```text
@@ -380,7 +382,8 @@ Notes:
 - Views may filter, group, sort, and display Entries according to Categories, Assignments, text search, dates, computed predicates, or rule output.
 - Editing within a View may create view-implied Assignments.
 - A View may begin with a single `Entry` column and later gain user-created columns from the heading bar.
-- User-created columns may correspond to Categories, Attributes, computed values, or parser-backed fields such as dates.
+- User-created columns should default to no definition. They may later correspond to Categories, Attributes, computed values, or parser-backed fields such as dates.
+- Creating a View column should not force an Assignment or require the user to decide whether the column is a Category or Attribute.
 
 Example view definition, conceptual only:
 
