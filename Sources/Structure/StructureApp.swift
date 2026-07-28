@@ -144,6 +144,12 @@ struct StructureApp: App {
                 .background(WindowTitleSetter(title: model.windowTitle))
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Structure") {
+                    AboutBoxController.shared.show()
+                }
+            }
+
             CommandGroup(after: .pasteboard) {
                 Button("Find") {
                     findPanel(for: model)
@@ -217,6 +223,117 @@ struct StructureApp: App {
                 .disabled(!model.hasOpenLibrary || !model.hasOpenView)
             }
         }
+    }
+}
+
+@MainActor
+final class AboutBoxController {
+    static let shared = AboutBoxController()
+
+    private var panel: NSPanel?
+
+    func show() {
+        if let panel {
+            panel.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 552, height: 300),
+            styleMask: [.titled, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.isReleasedWhenClosed = false
+        panel.center()
+        panel.contentView = NSHostingView(rootView: AboutBoxView())
+        self.panel = panel
+
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+struct AboutBoxView: View {
+    private var versionText: String {
+        if let buildTimestamp = Bundle.main.object(forInfoDictionaryKey: "StructureBuildTimestamp") as? String,
+           !buildTimestamp.isEmpty {
+            return "Version: \(buildTimestamp)"
+        }
+
+        return "Version: Development"
+    }
+
+    var body: some View {
+        ZStack {
+            AboutVisualEffectBackground()
+
+            VStack(alignment: .leading, spacing: 0) {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: 52, height: 52)
+                    .padding(.bottom, 22)
+
+                Text("Structure")
+                    .font(.headline.weight(.semibold))
+                    .padding(.bottom, 4)
+
+                Text(versionText)
+                    .font(.body)
+                    .padding(.bottom, 14)
+
+                Text("Frictionless capture for structure-it-later thinking.")
+                    .font(.body)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 14)
+
+                Text("©2026 Mark Gadzikowski. All Rights Reserved Worldwide.")
+                    .font(.body.weight(.semibold))
+                    .padding(.bottom, 2)
+
+                Text("Contact: structure@quantumpenguin.net")
+                    .font(.body)
+                    .padding(.top, 18)
+
+                Spacer()
+
+                HStack {
+                    Spacer()
+                    Button("OK") {
+                        NSApp.keyWindow?.close()
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .controlSize(.large)
+                    .frame(width: 228)
+                    Spacer()
+                }
+            }
+            .foregroundStyle(.primary)
+            .padding(.top, 24)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 16)
+        }
+        .frame(width: 552, height: 300)
+    }
+}
+
+struct AboutVisualEffectBackground: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = .hudWindow
+        view.blendingMode = .behindWindow
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context _: Context) {
+        nsView.state = .active
     }
 }
 

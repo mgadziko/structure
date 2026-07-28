@@ -8,6 +8,7 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 ICONSET="$ROOT/Resources/StructureIcon.iconset"
 ICON="$ROOT/Resources/StructureIcon.icns"
+BUILD_TIMESTAMP="$(date +%y%m%d-%H%M)"
 
 swift build -c release --package-path "$ROOT"
 
@@ -40,6 +41,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>StructureBuildTimestamp</key>
+    <string>BUILD_TIMESTAMP_PLACEHOLDER</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHumanReadableCopyright</key>
@@ -49,5 +52,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+/usr/libexec/PlistBuddy -c "Set :StructureBuildTimestamp $BUILD_TIMESTAMP" "$CONTENTS/Info.plist"
 
 printf 'Built %s\n' "$APP"

@@ -165,17 +165,37 @@ private struct FontSizeComboBox: NSViewRepresentable {
         }
 
         func comboBoxSelectionDidChange(_ notification: Notification) {
-            commit(notification)
+            commitSelectedValue(notification)
+        }
+
+        func comboBoxSelectionIsChanging(_ notification: Notification) {
+            commitSelectedValue(notification)
         }
 
         func controlTextDidEndEditing(_ notification: Notification) {
-            commit(notification)
+            commitTypedValue(notification)
         }
 
-        private func commit(_ notification: Notification) {
+        private func commitSelectedValue(_ notification: Notification) {
             guard let comboBox = notification.object as? NSComboBox else { return }
-            text = comboBox.stringValue
-            onCommit(comboBox.stringValue)
+            let value: String
+            if let selectedValue = comboBox.objectValueOfSelectedItem as? String {
+                value = selectedValue
+            } else {
+                value = comboBox.stringValue
+            }
+            comboBox.stringValue = value
+            commit(value)
+        }
+
+        private func commitTypedValue(_ notification: Notification) {
+            guard let comboBox = notification.object as? NSComboBox else { return }
+            commit(comboBox.stringValue)
+        }
+
+        private func commit(_ value: String) {
+            text = value
+            onCommit(value)
         }
     }
 }
