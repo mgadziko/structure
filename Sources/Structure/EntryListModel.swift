@@ -316,6 +316,17 @@ final class EntryListModel: ObservableObject {
         columnValues[EntryColumnValueKey(entryID: entryID, columnID: columnID)] ?? .empty
     }
 
+    func columnAutocompleteSource(entryID: Entry.ID, columnID: EntryColumn.ID) -> String {
+        visibleEntries
+            .filter { $0.id != entryID }
+            .compactMap { entry in
+                let value = columnValue(entryID: entry.id, columnID: columnID).text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
+            .joined(separator: "\n")
+    }
+
     func updateColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
         let key = EntryColumnValueKey(entryID: entryID, columnID: columnID)
         guard columnValues[key] != value else { return }

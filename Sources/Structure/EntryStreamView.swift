@@ -38,6 +38,7 @@ struct EntryStreamView: View {
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
                                 columnValue: model.columnValue,
+                                columnAutocompleteSource: model.columnAutocompleteSource,
                                 saveColumnValueDraft: model.saveColumnValueDraft,
                                 updateColumnValue: model.updateColumnValue,
                                 beginEntryEditing: model.beginEntryEditing,
