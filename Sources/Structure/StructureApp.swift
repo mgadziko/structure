@@ -136,10 +136,11 @@ private final class ViewSelectionController: NSObject, NSTableViewDataSource, NS
 struct StructureApp: App {
     @NSApplicationDelegateAdaptor(StructureAppDelegate.self) private var appDelegate
     @StateObject private var model = EntryListModel()
+    @State private var viewZoomScale: CGFloat = 1.0
 
     var body: some Scene {
         WindowGroup("Structure") {
-            EntryStreamView(model: model)
+            EntryStreamView(model: model, viewScale: viewZoomScale)
                 .frame(minWidth: 620, minHeight: 520)
                 .background(WindowTitleSetter(title: model.windowTitle))
         }
@@ -156,6 +157,20 @@ struct StructureApp: App {
                 }
                 .keyboardShortcut("f", modifiers: [.command])
                 .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+            }
+
+            CommandGroup(after: .toolbar) {
+                Button("Zoom In") {
+                    viewZoomScale = min(viewZoomScale + 0.1, 2.0)
+                }
+                .keyboardShortcut("+", modifiers: [.command])
+                .disabled(viewZoomScale >= 2.0)
+
+                Button("Zoom Out") {
+                    viewZoomScale = max(viewZoomScale - 0.1, 0.7)
+                }
+                .keyboardShortcut("-", modifiers: [.command])
+                .disabled(viewZoomScale <= 0.7)
             }
 
             CommandGroup(replacing: .newItem) {

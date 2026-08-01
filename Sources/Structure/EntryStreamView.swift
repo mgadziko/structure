@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EntryStreamView: View {
     @ObservedObject var model: EntryListModel
+    let viewScale: CGFloat
     @FocusState private var focusedEntryID: Entry.ID?
 
     var body: some View {
@@ -18,6 +19,7 @@ struct EntryStreamView: View {
                 showCreatedColumn: model.showCreatedColumn,
                 columnsBeforeEntry: model.columnsBeforeEntry,
                 columnsAfterEntry: model.columnsAfterEntry,
+                viewScale: viewScale,
                 availableColumnNames: model.availableColumnNames,
                 addColumn: model.addColumn,
                 moveColumn: model.moveColumn,
@@ -37,6 +39,7 @@ struct EntryStreamView: View {
                                 showCreatedColumn: model.showCreatedColumn,
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
+                                viewScale: viewScale,
                                 columnValue: model.columnValue,
                                 columnAutocompleteSource: model.columnAutocompleteSource,
                                 saveColumnValueDraft: model.saveColumnValueDraft,

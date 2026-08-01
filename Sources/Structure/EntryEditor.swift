@@ -9,6 +9,7 @@ struct EntryEditor: View {
     let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
+    let viewScale: CGFloat
     let columnValue: (Entry.ID, EntryColumn.ID) -> EntryColumnValue
     let columnAutocompleteSource: (Entry.ID, EntryColumn.ID) -> String
     let saveColumnValueDraft: (Entry.ID, EntryColumn.ID, EntryColumnValue) -> Void
@@ -21,20 +22,20 @@ struct EntryEditor: View {
     @State private var editorHeight: CGFloat = 22
 
     var body: some View {
-        HStack(alignment: .top, spacing: 18) {
+        HStack(alignment: .top, spacing: scaled(18)) {
             Text("\(rowNumber)")
-                .font(.system(size: 12, weight: .regular))
+                .font(.system(size: scaled(12), weight: .regular))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-                .frame(width: EntryRowLayout.rowNumberColumnWidth, alignment: .trailing)
-                .padding(.top, 8)
+                .frame(width: scaled(EntryRowLayout.rowNumberColumnWidth), alignment: .trailing)
+                .padding(.top, scaled(8))
 
             if showCreatedColumn {
                 Text(entry.displayDate)
-                    .font(.system(size: 12, weight: .regular))
+                    .font(.system(size: scaled(12), weight: .regular))
                     .foregroundStyle(.secondary)
-                    .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
-                    .padding(.top, 8)
+                    .frame(width: scaled(EntryRowLayout.createdColumnWidth), alignment: .leading)
+                    .padding(.top, scaled(8))
             }
 
             ForEach(columnsBeforeEntry) { column in
@@ -42,6 +43,7 @@ struct EntryEditor: View {
                     value: columnValue(entry.id, column.id),
                     entryText: text,
                     columnAutocompleteText: columnAutocompleteSource(entry.id, column.id),
+                    viewScale: viewScale,
                     entryID: entry.id,
                     columnID: column.id,
                     columnTitle: column.title,
@@ -62,7 +64,7 @@ struct EntryEditor: View {
                 )
             }
 
-            columnCreationSpacer()
+            columnCreationSpacer(scale: viewScale)
 
             VStack(alignment: .leading, spacing: 5) {
                 ZStack(alignment: .topLeading) {
@@ -89,16 +91,19 @@ struct EntryEditor: View {
                     .frame(height: editorHeight)
                     .accessibilityLabel("Entry created \(entry.displayDate)")
                 }
+                .frame(width: EntryRowLayout.entryColumnWidth, height: editorHeight, alignment: .topLeading)
+                .scaleEffect(viewScale, anchor: .topLeading)
             }
-            .frame(width: EntryRowLayout.entryColumnWidth, alignment: .leading)
+            .frame(width: scaled(EntryRowLayout.entryColumnWidth), height: scaled(editorHeight), alignment: .topLeading)
 
-            columnCreationSpacer()
+            columnCreationSpacer(scale: viewScale)
 
             ForEach(columnsAfterEntry) { column in
                 UndefinedColumnCell(
                     value: columnValue(entry.id, column.id),
                     entryText: text,
                     columnAutocompleteText: columnAutocompleteSource(entry.id, column.id),
+                    viewScale: viewScale,
                     entryID: entry.id,
                     columnID: column.id,
                     columnTitle: column.title,
@@ -119,6 +124,7 @@ struct EntryEditor: View {
                 )
             }
         }
+        .scaleEffect(1, anchor: .topLeading)
         .onAppear {
             EntrySelectionCoordinator.shared.updateCellOrder(
                 entryID: entry.id,
@@ -141,6 +147,10 @@ struct EntryEditor: View {
             )
         }
     }
+
+    private func scaled(_ value: CGFloat) -> CGFloat {
+        value * viewScale
+    }
 }
 
 enum EntryRowLayout {
@@ -158,6 +168,7 @@ private struct UndefinedColumnCell: View {
     let value: EntryColumnValue
     let entryText: String
     let columnAutocompleteText: String
+    let viewScale: CGFloat
     let entryID: Entry.ID
     let columnID: EntryColumn.ID
     let columnTitle: String
@@ -201,13 +212,15 @@ private struct UndefinedColumnCell: View {
                     .allowsHitTesting(false)
             }
         }
+            .frame(width: width, height: displayHeight, alignment: .topLeading)
+            .scaleEffect(viewScale, anchor: .topLeading)
             .background(Color(nsColor: .controlBackgroundColor).opacity(0.22))
             .overlay(
                 RoundedRectangle(cornerRadius: 3)
                     .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
             )
             .accessibilityLabel("\(columnTitle) value")
-            .frame(width: width, height: displayHeight, alignment: .topLeading)
+            .frame(width: CGFloat(width) * viewScale, height: displayHeight * viewScale, alignment: .topLeading)
             .onAppear {
                 draft = value.text
                 draftRichTextData = value.richTextData
@@ -580,9 +593,9 @@ private func parentTextWidth(_ width: Double) -> CGFloat {
     max(24, CGFloat(width) - 12)
 }
 
-private func columnCreationSpacer() -> some View {
+private func columnCreationSpacer(scale: CGFloat) -> some View {
     Color.clear
-        .frame(width: EntryRowLayout.columnCreationControlWidth, height: 18)
+        .frame(width: EntryRowLayout.columnCreationControlWidth * scale, height: 18 * scale)
         .accessibilityHidden(true)
 }
 

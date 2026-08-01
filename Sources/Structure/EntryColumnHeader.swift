@@ -8,6 +8,7 @@ struct EntryColumnHeader: View {
     let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
+    let viewScale: CGFloat
     let availableColumnNames: [String]
     let addColumn: (String, EntryColumnPlacement) -> Void
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
@@ -20,11 +21,11 @@ struct EntryColumnHeader: View {
     @FocusState private var draftIsFocused: Bool
 
     var body: some View {
-        HStack(alignment: .center, spacing: 18) {
+        HStack(alignment: .center, spacing: scaled(18)) {
             Text("#")
-                .font(.system(size: 13, weight: .semibold))
+                .font(.system(size: scaled(13), weight: .semibold))
                 .foregroundStyle(.secondary)
-                .frame(width: EntryRowLayout.rowNumberColumnWidth, alignment: .trailing)
+                .frame(width: scaled(EntryRowLayout.rowNumberColumnWidth), alignment: .trailing)
                 .accessibilityLabel("Row number")
 
             if showCreatedColumn {
@@ -32,12 +33,13 @@ struct EntryColumnHeader: View {
                     title: "Created",
                     column: .created,
                     sort: sort,
+                    viewScale: viewScale,
                     action: { column in
                         beginHeaderEditing()
                         sortBy(column)
                     }
                 )
-                .frame(width: EntryRowLayout.createdColumnWidth, alignment: .leading)
+                .frame(width: scaled(EntryRowLayout.createdColumnWidth), alignment: .leading)
             }
 
             ForEach(columnsBeforeEntry) { column in
@@ -52,7 +54,8 @@ struct EntryColumnHeader: View {
                     beginHeaderEditing: beginHeaderEditing,
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
-                    resizeColumn: resizeColumn
+                    resizeColumn: resizeColumn,
+                    viewScale: viewScale
                 )
             }
 
@@ -62,12 +65,13 @@ struct EntryColumnHeader: View {
                 title: "Entry",
                 column: .body,
                 sort: sort,
+                viewScale: viewScale,
                 action: { column in
                     beginHeaderEditing()
                     sortBy(column)
                 }
             )
-            .frame(width: EntryRowLayout.entryColumnWidth, alignment: .leading)
+            .frame(width: scaled(EntryRowLayout.entryColumnWidth), alignment: .leading)
 
             columnCreationControl(for: .afterEntry)
 
@@ -83,7 +87,8 @@ struct EntryColumnHeader: View {
                     beginHeaderEditing: beginHeaderEditing,
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
-                    resizeColumn: resizeColumn
+                    resizeColumn: resizeColumn,
+                    viewScale: viewScale
                 )
             }
             if let lastColumn = columnsAfterEntry.last {
@@ -92,10 +97,14 @@ struct EntryColumnHeader: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, EntryRowLayout.horizontalPadding)
-        .padding(.top, 20)
-        .padding(.bottom, 8)
+        .padding(.horizontal, scaled(EntryRowLayout.horizontalPadding))
+        .padding(.top, scaled(20))
+        .padding(.bottom, scaled(8))
         .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    private func scaled(_ value: CGFloat) -> CGFloat {
+        value * viewScale
     }
 
     @ViewBuilder
@@ -106,7 +115,7 @@ struct EntryColumnHeader: View {
                 text: $draftColumnTitle,
                 onCommit: commitDraftColumn
             )
-            .frame(width: EntryRowLayout.defaultUndefinedColumnWidth, height: 24, alignment: .leading)
+            .frame(width: EntryRowLayout.defaultUndefinedColumnWidth * Double(viewScale), height: scaled(24), alignment: .leading)
             .focused($draftIsFocused)
             .onAppear {
                 DispatchQueue.main.async {
@@ -120,8 +129,8 @@ struct EntryColumnHeader: View {
                 draftColumnTitle = ""
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .frame(width: EntryRowLayout.columnCreationControlWidth, height: 18)
+                    .font(.system(size: scaled(10), weight: .semibold))
+                    .frame(width: scaled(EntryRowLayout.columnCreationControlWidth), height: scaled(18))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -238,6 +247,7 @@ private struct UndefinedColumnHeader: View {
     @Binding var draggedColumnID: EntryColumn.ID?
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
+    let viewScale: CGFloat
     @State private var dragStartWidth: Double?
     @State private var previewWidth: Double?
     @State private var isEditingTitle = false
@@ -268,11 +278,11 @@ private struct UndefinedColumnHeader: View {
                         .onChanged { value in
                             let baseWidth = dragStartWidth ?? column.width
                             dragStartWidth = baseWidth
-                            previewWidth = clampedColumnWidth(baseWidth + value.translation.width)
+                            previewWidth = clampedColumnWidth(baseWidth + value.translation.width / Double(viewScale))
                         }
                         .onEnded { value in
                             let baseWidth = dragStartWidth ?? column.width
-                            resizeColumn(column.id, baseWidth + value.translation.width)
+                            resizeColumn(column.id, baseWidth + value.translation.width / Double(viewScale))
                             previewWidth = nil
                             dragStartWidth = nil
                         }
@@ -280,6 +290,8 @@ private struct UndefinedColumnHeader: View {
                 .help("Drag to resize column")
         }
         .frame(width: displayWidth, alignment: .leading)
+        .scaleEffect(viewScale, anchor: .topLeading)
+        .frame(width: displayWidth * Double(viewScale), alignment: .leading)
         .contentShape(Rectangle())
         .onDrag {
             draggedColumnID = column.id
@@ -329,6 +341,7 @@ private struct UndefinedColumnHeader: View {
                 title: column.title,
                 column: .userColumn(column.id),
                 sort: sort,
+                viewScale: viewScale,
                 action: action
             )
             .simultaneousGesture(
@@ -410,6 +423,7 @@ private struct SortHeaderButton: View {
     let title: String
     let column: EntrySortColumn
     let sort: EntrySort
+    let viewScale: CGFloat
     let action: (EntrySortColumn) -> Void
 
     var body: some View {
@@ -420,11 +434,11 @@ private struct SortHeaderButton: View {
                 Text(title)
                 if sort.column == column {
                     Image(systemName: sort.direction == .ascending ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(.system(size: 10 * viewScale, weight: .semibold))
                         .accessibilityHidden(true)
                 }
             }
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: 13 * viewScale, weight: .semibold))
             .foregroundStyle(.blue)
         }
         .buttonStyle(.plain)
