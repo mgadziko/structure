@@ -24,6 +24,7 @@ struct EntryStreamView: View {
                 addColumn: model.addColumn,
                 moveColumn: model.moveColumn,
                 renameColumn: model.renameColumn,
+                updateColumnDefinition: model.updateColumnDefinition,
                 resizeColumn: model.resizeColumn,
                 beginHeaderEditing: clearEntryFocus
             )

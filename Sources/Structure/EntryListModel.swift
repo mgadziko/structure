@@ -305,6 +305,15 @@ final class EntryListModel: ObservableObject {
         refreshAvailableColumnNames()
     }
 
+    func updateColumnDefinition(columnID: EntryColumn.ID, definition: EntryColumnDefinition) {
+        guard let index = columns.firstIndex(where: { $0.id == columnID }),
+              columns[index].definition != definition
+        else { return }
+
+        columns[index].definition = definition
+        persistColumnDefinition(columnID: columnID, definition: definition)
+    }
+
     var columnsBeforeEntry: [EntryColumn] {
         columns.filter { $0.placement == .beforeEntry }
     }
@@ -612,6 +621,18 @@ final class EntryListModel: ObservableObject {
         guard let store else { return }
         do {
             try store.updateColumnTitle(columnID: columnID, title: title)
+            allColumnNames = try store.loadAllColumnNames()
+            errorMessage = nil
+        } catch {
+            errorMessage = String(describing: error)
+        }
+    }
+
+    private func persistColumnDefinition(columnID: EntryColumn.ID, definition: EntryColumnDefinition) {
+        guard let store else { return }
+        do {
+            try store.updateColumnDefinition(columnID: columnID, definition: definition)
+            columns = try store.loadColumns(viewID: activeView?.id ?? StructureView.defaultID)
             allColumnNames = try store.loadAllColumnNames()
             errorMessage = nil
         } catch {

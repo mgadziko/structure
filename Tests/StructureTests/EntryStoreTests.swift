@@ -249,7 +249,7 @@ final class EntryStoreTests: XCTestCase {
             placement: .afterEntry,
             orderIndex: 0,
             width: 240,
-            definition: .attribute
+            definition: .textAttribute
         )
         let targetColumn = EntryColumn(
             id: "column-target",
@@ -258,7 +258,7 @@ final class EntryStoreTests: XCTestCase {
             placement: .afterEntry,
             orderIndex: 0,
             width: 240,
-            definition: .attribute
+            definition: .textAttribute
         )
         let richTextData = Data("copied rtf".utf8)
 
@@ -343,6 +343,44 @@ final class EntryStoreTests: XCTestCase {
 
         XCTAssertEqual(
             try store.loadColumnValues()[EntryColumnValueKey(entryID: entry.id, columnID: targetColumn.id)],
+            EntryColumnValue(text: "Sarah", richTextData: nil)
+        )
+    }
+
+    func testColumnDefinitionUpdatesRoundTripAndPreservesValues() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        var column = EntryColumn(
+            id: "column-1",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "Sarah", richTextData: nil),
+            updatedAt: timestamp
+        )
+        try store.updateColumnDefinition(columnID: column.id, definition: .category, updatedAt: timestamp)
+
+        column.definition = .category
+        XCTAssertEqual(try store.loadColumns(), [column])
+        XCTAssertEqual(
+            try store.loadColumnValues()[EntryColumnValueKey(entryID: entry.id, columnID: column.id)],
             EntryColumnValue(text: "Sarah", richTextData: nil)
         )
     }

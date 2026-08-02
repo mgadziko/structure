@@ -1,9 +1,57 @@
 import Foundation
 
-enum EntryColumnDefinition: String {
+enum EntryColumnDefinition: String, CaseIterable, Identifiable {
     case none
     case category
-    case attribute
+    case textAttribute = "text_attribute"
+    case date
+    case number
+    case state
+
+    var id: String { rawValue }
+
+    init(storageValue: String?) {
+        switch storageValue {
+        case "attribute":
+            self = .textAttribute
+        default:
+            self = storageValue.flatMap { EntryColumnDefinition(rawValue: $0) } ?? .none
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .none:
+            return "Undefined"
+        case .category:
+            return "Category"
+        case .textAttribute:
+            return "Text Attribute"
+        case .date:
+            return "Date"
+        case .number:
+            return "Number"
+        case .state:
+            return "State"
+        }
+    }
+
+    var inspectorDescription: String {
+        switch self {
+        case .none:
+            return "Accepts plain values without assigning a formal meaning."
+        case .category:
+            return "Treats values as category-like assignments that can be reused across Views."
+        case .textAttribute:
+            return "Stores descriptive text values. Detailed behavior comes later."
+        case .date:
+            return "Stores date values. Parsing and date states come later."
+        case .number:
+            return "Stores numeric values. Calculations come later."
+        case .state:
+            return "Stores changeable state values. History comes later."
+        }
+    }
 }
 
 enum EntryColumnPlacement {

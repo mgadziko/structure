@@ -205,7 +205,7 @@ final class EntryStore {
             placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
             orderIndex: Int(sqlite3_column_int(statement, 5)),
             width: sqlite3_column_double(statement, 6),
-            definition: EntryColumnDefinition(rawValue: definitionText) ?? .none
+            definition: EntryColumnDefinition(storageValue: definitionText)
         )
     }
 
@@ -292,7 +292,7 @@ final class EntryStore {
                 placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
                 orderIndex: Int(sqlite3_column_int(statement, 5)),
                 width: sqlite3_column_double(statement, 6),
-                definition: EntryColumnDefinition(rawValue: definitionText) ?? .none
+                definition: EntryColumnDefinition(storageValue: definitionText)
             ))
         }
 
@@ -380,6 +380,39 @@ final class EntryStore {
 
         try step(statement)
         try updateColumnDefinitionTitle(forColumnID: columnID, title: title, updatedAt: updatedAt)
+    }
+
+    func updateColumnDefinition(columnID: EntryColumn.ID, definition: EntryColumnDefinition, updatedAt: Date = Date()) throws {
+        let definitionID = try columnDefinitionID(forColumnID: columnID)
+        let sql = """
+        UPDATE column_definitions
+        SET definition_kind = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, definition.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, definitionID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+
+        let legacySQL = """
+        UPDATE entry_columns
+        SET definition_kind = ?, updated_at = ?
+        WHERE column_definition_id = ?;
+        """
+        var legacyStatement: OpaquePointer?
+        try prepare(legacySQL, statement: &legacyStatement)
+        defer { sqlite3_finalize(legacyStatement) }
+
+        sqlite3_bind_text(legacyStatement, 1, definition.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(legacyStatement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(legacyStatement, 3, definitionID, -1, SQLITE_TRANSIENT)
+
+        try step(legacyStatement)
     }
 
     func updateColumnOrder(_ columns: [EntryColumn], updatedAt: Date = Date()) throws {
@@ -674,7 +707,7 @@ final class EntryStore {
                 definitionID: EntryColumn.defaultDefinitionID(for: title),
                 title: title,
                 width: sqlite3_column_double(statement, 2),
-                definition: EntryColumnDefinition(rawValue: definitionText) ?? .none,
+                definition: EntryColumnDefinition(storageValue: definitionText),
                 createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
                 updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5))
             ))

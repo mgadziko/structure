@@ -13,11 +13,13 @@ struct EntryColumnHeader: View {
     let addColumn: (String, EntryColumnPlacement) -> Void
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
     let renameColumn: (EntryColumn.ID, String) -> Void
+    let updateColumnDefinition: (EntryColumn.ID, EntryColumnDefinition) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
     let beginHeaderEditing: () -> Void
     @State private var draftColumnPlacement: EntryColumnPlacement?
     @State private var draftColumnTitle = ""
     @State private var draggedColumnID: EntryColumn.ID?
+    @State private var inspectedColumn: EntryColumn?
     @FocusState private var draftIsFocused: Bool
 
     var body: some View {
@@ -51,6 +53,10 @@ struct EntryColumnHeader: View {
                         sortBy(column)
                     },
                     renameColumn: renameColumn,
+                    inspectColumn: { column in
+                        beginHeaderEditing()
+                        inspectedColumn = column
+                    },
                     beginHeaderEditing: beginHeaderEditing,
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
@@ -84,6 +90,10 @@ struct EntryColumnHeader: View {
                         sortBy(column)
                     },
                     renameColumn: renameColumn,
+                    inspectColumn: { column in
+                        beginHeaderEditing()
+                        inspectedColumn = column
+                    },
                     beginHeaderEditing: beginHeaderEditing,
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
@@ -101,6 +111,18 @@ struct EntryColumnHeader: View {
         .padding(.top, scaled(20))
         .padding(.bottom, scaled(8))
         .background(Color(nsColor: .textBackgroundColor))
+        .sheet(item: $inspectedColumn) { column in
+            ColumnDefinitionInspector(
+                column: column,
+                updateColumnDefinition: { definition in
+                    updateColumnDefinition(column.id, definition)
+                    inspectedColumn = nil
+                },
+                cancel: {
+                    inspectedColumn = nil
+                }
+            )
+        }
     }
 
     private func scaled(_ value: CGFloat) -> CGFloat {
@@ -243,6 +265,7 @@ private struct UndefinedColumnHeader: View {
     let sort: EntrySort
     let action: (EntrySortColumn) -> Void
     let renameColumn: (EntryColumn.ID, String) -> Void
+    let inspectColumn: (EntryColumn) -> Void
     let beginHeaderEditing: () -> Void
     @Binding var draggedColumnID: EntryColumn.ID?
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
@@ -311,6 +334,11 @@ private struct UndefinedColumnHeader: View {
                 titleDraft = newTitle
             }
         }
+        .contextMenu {
+            Button("Column Info...") {
+                inspectColumn(column)
+            }
+        }
         .help("Click to sort; double-click heading to rename; drag heading to rearrange; drag right edge to resize")
     }
 
@@ -363,6 +391,61 @@ private struct UndefinedColumnHeader: View {
             titleDraft = column.title
         }
         isEditingTitle = false
+    }
+}
+
+private struct ColumnDefinitionInspector: View {
+    let column: EntryColumn
+    let updateColumnDefinition: (EntryColumnDefinition) -> Void
+    let cancel: () -> Void
+    @State private var selectedDefinition: EntryColumnDefinition
+
+    init(
+        column: EntryColumn,
+        updateColumnDefinition: @escaping (EntryColumnDefinition) -> Void,
+        cancel: @escaping () -> Void
+    ) {
+        self.column = column
+        self.updateColumnDefinition = updateColumnDefinition
+        self.cancel = cancel
+        _selectedDefinition = State(initialValue: column.definition)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(column.title)
+                    .font(.headline)
+                Text("Column Definition")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Picker("Kind", selection: $selectedDefinition) {
+                ForEach(EntryColumnDefinition.allCases) { definition in
+                    Text(definition.displayName).tag(definition)
+                }
+            }
+            .pickerStyle(.menu)
+
+            Text(selectedDefinition.inspectorDescription)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    cancel()
+                }
+                Button("Apply") {
+                    updateColumnDefinition(selectedDefinition)
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 360, alignment: .leading)
     }
 }
 
