@@ -7,59 +7,69 @@ struct EntryStreamView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ViewNameBar(
+            ViewControlsBar(
                 title: model.activeViewTitle,
+                activeViewID: model.activeView?.id,
+                views: model.views,
+                hasOpenLibrary: model.hasOpenLibrary,
+                openView: model.openView,
+                createView: model.createView,
                 rename: model.renameActiveView,
                 beginEditing: clearEntryFocus
             )
             FormattingBar()
-            EntryColumnHeader(
-                sort: model.sort,
-                sortBy: model.sortBy,
-                showCreatedColumn: model.showCreatedColumn,
-                columnsBeforeEntry: model.columnsBeforeEntry,
-                columnsAfterEntry: model.columnsAfterEntry,
-                viewScale: viewScale,
-                availableColumnNames: model.availableColumnNames,
-                addColumn: model.addColumn,
-                moveColumn: model.moveColumn,
-                renameColumn: model.renameColumn,
-                updateColumnDefinition: model.updateColumnDefinition,
-                resizeColumn: model.resizeColumn,
-                beginHeaderEditing: clearEntryFocus
-            )
             ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        ForEach(Array(model.visibleEntries.enumerated()), id: \.element.id) { index, entry in
-                            EntryEditor(
-                                entry: entry,
-                                rowNumber: index + 1,
-                                text: binding(for: entry.id),
-                                richTextData: richTextBinding(for: entry.id),
+                GeometryReader { geometry in
+                    ScrollView([.horizontal, .vertical]) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            EntryColumnHeader(
+                                sort: model.sort,
+                                sortBy: model.sortBy,
                                 showCreatedColumn: model.showCreatedColumn,
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
                                 viewScale: viewScale,
-                                columnValue: model.columnValue,
-                                columnAutocompleteSource: model.columnAutocompleteSource,
-                                saveColumnValueDraft: model.saveColumnValueDraft,
-                                updateColumnValue: model.updateColumnValue,
-                                beginEntryEditing: model.beginEntryEditing,
-                                endEntryEditing: model.endEntryEditing,
-                                beginColumnEditing: model.beginColumnEditing,
-                                endColumnEditing: model.endColumnEditing,
-                                focusedEntryID: $focusedEntryID
+                                availableColumnNames: model.availableColumnNames,
+                                addColumn: model.addColumn,
+                                moveColumn: model.moveColumn,
+                                renameColumn: model.renameColumn,
+                                updateColumnDefinition: model.updateColumnDefinition,
+                                resizeColumn: model.resizeColumn,
+                                beginHeaderEditing: clearEntryFocus
                             )
-                            .id(entry.id)
+
+                            VStack(alignment: .leading, spacing: 22) {
+                                ForEach(Array(model.visibleEntries.enumerated()), id: \.element.id) { index, entry in
+                                    EntryEditor(
+                                        entry: entry,
+                                        rowNumber: index + 1,
+                                        text: binding(for: entry.id),
+                                        richTextData: richTextBinding(for: entry.id),
+                                        showCreatedColumn: model.showCreatedColumn,
+                                        columnsBeforeEntry: model.columnsBeforeEntry,
+                                        columnsAfterEntry: model.columnsAfterEntry,
+                                        viewScale: viewScale,
+                                        columnValue: model.columnValue,
+                                        columnAutocompleteSource: model.columnAutocompleteSource,
+                                        saveColumnValueDraft: model.saveColumnValueDraft,
+                                        updateColumnValue: model.updateColumnValue,
+                                        beginEntryEditing: model.beginEntryEditing,
+                                        endEntryEditing: model.endEntryEditing,
+                                        beginColumnEditing: model.beginColumnEditing,
+                                        endColumnEditing: model.endColumnEditing,
+                                        focusedEntryID: $focusedEntryID
+                                    )
+                                    .id(entry.id)
+                                }
+                            }
+                            .padding(.horizontal, EntryRowLayout.horizontalPadding * viewScale)
+                            .padding(.vertical, 24 * viewScale)
                         }
+                        .frame(minWidth: tableContentWidth, minHeight: geometry.size.height, alignment: .topLeading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, EntryRowLayout.horizontalPadding)
-                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(Color(nsColor: .textBackgroundColor))
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .background(Color(nsColor: .textBackgroundColor))
                 .onAppear {
                     updateVisibleEntryOrder()
                     focusCurrentEntry(proxy: proxy, animated: false)
@@ -126,6 +136,31 @@ struct EntryStreamView: View {
         )
     }
 
+    private var tableContentWidth: CGFloat {
+        let scaledSpacing = 18 * viewScale
+        let fixedWidths = [
+            EntryRowLayout.rowNumberColumnWidth,
+            model.showCreatedColumn ? EntryRowLayout.createdColumnWidth : 0,
+            EntryRowLayout.columnCreationControlWidth,
+            EntryRowLayout.entryColumnWidth,
+            EntryRowLayout.columnCreationControlWidth,
+            model.columnsAfterEntry.isEmpty ? 0 : 72
+        ].reduce(0) { $0 + ($1 * viewScale) }
+        let beforeColumnWidth = model.columnsBeforeEntry.reduce(CGFloat(0)) { $0 + (CGFloat($1.width) * viewScale) }
+        let afterColumnWidth = model.columnsAfterEntry.reduce(CGFloat(0)) { $0 + (CGFloat($1.width) * viewScale) }
+        let visibleElementCount = 4
+            + (model.showCreatedColumn ? 1 : 0)
+            + model.columnsBeforeEntry.count
+            + model.columnsAfterEntry.count
+            + (model.columnsAfterEntry.isEmpty ? 0 : 1)
+        let spacingWidth = CGFloat(max(visibleElementCount - 1, 0)) * scaledSpacing
+        return fixedWidths
+            + beforeColumnWidth
+            + afterColumnWidth
+            + spacingWidth
+            + (EntryRowLayout.horizontalPadding * viewScale * 2)
+    }
+
     private func focusCurrentEntry(proxy: ScrollViewProxy, animated: Bool) {
         guard let id = model.currentEntryID else { return }
         focusedEntryID = id
@@ -133,10 +168,10 @@ struct EntryStreamView: View {
         DispatchQueue.main.async {
             if animated {
                 withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(id, anchor: .bottom)
+                    proxy.scrollTo(id, anchor: .bottomLeading)
                 }
             } else {
-                proxy.scrollTo(id, anchor: .bottom)
+                proxy.scrollTo(id, anchor: .bottomLeading)
             }
             focusedEntryID = id
             EntrySelectionCoordinator.shared.focusEntry(id: id)

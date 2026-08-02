@@ -459,6 +459,8 @@ private final class ColumnCellTextView: NSTextView {
     }
 
     private var ghostSuffix = ""
+    private var ghostReplacementRange: NSRange?
+    private var ghostReplacementText = ""
 
     deinit {
         EntrySelectionCoordinator.shared.unregister(self)
@@ -508,44 +510,54 @@ private final class ColumnCellTextView: NSTextView {
     }
 
     func updateGhostCompletion() {
-        let newSuffix = completionSuffix()
+        let completion = ghostCompletion()
+        let newSuffix = completion?.suffix ?? ""
         if ghostSuffix != newSuffix {
             ghostSuffix = newSuffix
             needsDisplay = true
         }
+        ghostReplacementRange = completion?.replacementRange
+        ghostReplacementText = completion?.replacementText ?? ""
     }
 
     private func acceptGhostCompletion() -> Bool {
         guard !ghostSuffix.isEmpty,
-              selectedRange().length == 0
+              selectedRange().length == 0,
+              let replacementRange = ghostReplacementRange,
+              !ghostReplacementText.isEmpty
         else { return false }
 
-        let suffix = ghostSuffix
+        let replacementText = ghostReplacementText
         ghostSuffix = ""
-        insertText(suffix, replacementRange: selectedRange())
+        ghostReplacementRange = nil
+        ghostReplacementText = ""
+        insertText(replacementText, replacementRange: replacementRange)
         updateGhostCompletion()
         return true
     }
 
-    private func completionSuffix() -> String {
+    private func ghostCompletion() -> AutocompleteCompletion? {
         guard selectedRange().length == 0,
-              let fragment = wordFragmentBeforeInsertionPoint(),
-              !fragment.isEmpty
-        else { return "" }
+              let fragment = wordFragmentBeforeInsertionPoint()
+        else { return nil }
 
-        let lowercasedFragment = fragment.lowercased()
+        let lowercasedFragment = fragment.text.lowercased()
         for candidate in autocompleteCandidates(from: autocompleteSourceText) {
             let lowercasedCandidate = candidate.lowercased()
             if lowercasedCandidate.hasPrefix(lowercasedFragment),
                lowercasedCandidate != lowercasedFragment {
-                return String(candidate.dropFirst(fragment.count))
+                return AutocompleteCompletion(
+                    suffix: String(candidate.dropFirst(fragment.text.count)),
+                    replacementRange: fragment.range,
+                    replacementText: candidate
+                )
             }
         }
 
-        return ""
+        return nil
     }
 
-    private func wordFragmentBeforeInsertionPoint() -> String? {
+    private func wordFragmentBeforeInsertionPoint() -> AutocompleteFragment? {
         let nsString = string as NSString
         let location = selectedRange().location
         guard location > 0, location <= nsString.length else { return nil }
@@ -559,7 +571,8 @@ private final class ColumnCellTextView: NSTextView {
         }
 
         guard start < location else { return nil }
-        return nsString.substring(with: NSRange(location: start, length: location - start))
+        let range = NSRange(location: start, length: location - start)
+        return AutocompleteFragment(text: nsString.substring(with: range), range: range)
     }
 
     private func drawGhostCompletion() {
@@ -587,6 +600,17 @@ private final class ColumnCellTextView: NSTextView {
             withAttributes: attributes
         )
     }
+}
+
+private struct AutocompleteFragment {
+    let text: String
+    let range: NSRange
+}
+
+private struct AutocompleteCompletion {
+    let suffix: String
+    let replacementRange: NSRange
+    let replacementText: String
 }
 
 private func parentTextWidth(_ width: Double) -> CGFloat {
