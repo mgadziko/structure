@@ -4,6 +4,8 @@ This document defines the first working data model for Structure. It is not a fi
 
 The model should support frictionless Entry creation now and remain compatible with later categorization, views, local full-text search, encryption, and one-person multi-device sync.
 
+See also [Agenda-Informed Data Model](agenda-informed-data-model.md), which records the Lotus Agenda lessons behind the Assignment-centered direction.
+
 ## Model Goals
 
 The first model should provide:
