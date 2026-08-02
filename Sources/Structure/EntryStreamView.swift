@@ -65,7 +65,11 @@ struct EntryStreamView: View {
                             .padding(.horizontal, EntryRowLayout.horizontalPadding * viewScale)
                             .padding(.vertical, 24 * viewScale)
                         }
-                        .frame(minWidth: tableContentWidth, minHeight: geometry.size.height, alignment: .topLeading)
+                        .frame(
+                            minWidth: max(tableContentWidth, geometry.size.width),
+                            minHeight: geometry.size.height,
+                            alignment: .topLeading
+                        )
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(Color(nsColor: .textBackgroundColor))

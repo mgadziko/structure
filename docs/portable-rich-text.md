@@ -58,12 +58,12 @@ Near term:
 
 - keep the current macOS rich text editor
 - keep storing plain text as canonical searchable content
-- treat RTF as prototype presentation data
+- add optional Markdown storage fields while they are still invisible to the UI
+- treat RTF as prototype presentation/cache data
 - avoid adding more formatting features that cannot map cleanly to Markdown
 
 Later:
 
-- add a Markdown storage field or document representation
 - migrate existing RTF formatting into the supported Markdown subset where possible
 - use platform-native editors/renderers as views over the same Markdown content
 - keep Entry creation frictionless and avoid exposing Markdown syntax unless the user chooses to type it directly

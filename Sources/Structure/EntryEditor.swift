@@ -47,6 +47,7 @@ struct EntryEditor: View {
                     entryID: entry.id,
                     columnID: column.id,
                     columnTitle: column.title,
+                    prioritizesColumnAutocomplete: column.definition == .category,
                     width: column.width,
                     rowHeight: editorHeight,
                     saveDraft: { value in
@@ -107,6 +108,7 @@ struct EntryEditor: View {
                     entryID: entry.id,
                     columnID: column.id,
                     columnTitle: column.title,
+                    prioritizesColumnAutocomplete: column.definition == .category,
                     width: column.width,
                     rowHeight: editorHeight,
                     saveDraft: { value in
@@ -172,6 +174,7 @@ private struct UndefinedColumnCell: View {
     let entryID: Entry.ID
     let columnID: EntryColumn.ID
     let columnTitle: String
+    let prioritizesColumnAutocomplete: Bool
     let width: Double
     let rowHeight: CGFloat
     let saveDraft: (EntryColumnValue) -> Void
@@ -232,7 +235,10 @@ private struct UndefinedColumnCell: View {
     }
 
     private var autocompleteSourceText: String {
-        [entryText, columnAutocompleteText]
+        let sourceOrder = prioritizesColumnAutocomplete
+            ? [columnAutocompleteText, entryText]
+            : [entryText, columnAutocompleteText]
+        return sourceOrder
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")

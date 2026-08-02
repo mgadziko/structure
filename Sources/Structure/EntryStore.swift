@@ -30,7 +30,7 @@ final class EntryStore {
 
     func loadEntries() throws -> [Entry] {
         let sql = """
-        SELECT id, body_plain_text, body_rtf, created_at, updated_at, captured_at, deleted_at
+        SELECT id, body_plain_text, body_markdown, body_rtf, created_at, updated_at, captured_at, deleted_at
         FROM entries
         WHERE deleted_at IS NULL
         ORDER BY captured_at ASC, created_at ASC;
@@ -47,25 +47,27 @@ final class EntryStore {
             else { continue }
 
             let richTextData: Data?
-            if sqlite3_column_type(statement, 2) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 3) == SQLITE_NULL {
                 richTextData = nil
-            } else if let bytes = sqlite3_column_blob(statement, 2) {
-                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 2)))
+            } else if let bytes = sqlite3_column_blob(statement, 3) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
             } else {
                 richTextData = nil
             }
 
-            let deletedAtValue = sqlite3_column_type(statement, 6) == SQLITE_NULL
+            let bodyMarkdown = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+            let deletedAtValue = sqlite3_column_type(statement, 7) == SQLITE_NULL
                 ? nil
-                : Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+                : Date(timeIntervalSince1970: sqlite3_column_double(statement, 7))
 
             entries.append(Entry(
                 id: String(cString: idText),
                 body: String(cString: bodyText),
+                bodyMarkdown: bodyMarkdown,
                 richTextData: richTextData,
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
-                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
-                capturedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                capturedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6)),
                 deletedAt: deletedAtValue
             ))
         }
@@ -211,8 +213,8 @@ final class EntryStore {
 
     func insert(_ entry: Entry) throws {
         let sql = """
-        INSERT INTO entries (id, body_plain_text, body_rtf, created_at, updated_at, captured_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO entries (id, body_plain_text, body_markdown, body_rtf, created_at, updated_at, captured_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?);
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
@@ -220,14 +222,15 @@ final class EntryStore {
 
         sqlite3_bind_text(statement, 1, entry.id, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 2, entry.body, -1, SQLITE_TRANSIENT)
-        bindRichText(entry.richTextData, to: statement, at: 3)
-        sqlite3_bind_double(statement, 4, entry.createdAt.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 5, entry.updatedAt.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 6, entry.capturedAt.timeIntervalSince1970)
+        bindOptionalText(entry.bodyMarkdown, to: statement, at: 3)
+        bindRichText(entry.richTextData, to: statement, at: 4)
+        sqlite3_bind_double(statement, 5, entry.createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, entry.updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, entry.capturedAt.timeIntervalSince1970)
         if let deletedAt = entry.deletedAt {
-            sqlite3_bind_double(statement, 7, deletedAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 8, deletedAt.timeIntervalSince1970)
         } else {
-            sqlite3_bind_null(statement, 7)
+            sqlite3_bind_null(statement, 8)
         }
 
         try step(statement)
@@ -236,7 +239,7 @@ final class EntryStore {
     func update(_ entry: Entry) throws {
         let sql = """
         UPDATE entries
-        SET body_plain_text = ?, body_rtf = ?, updated_at = ?, deleted_at = ?
+        SET body_plain_text = ?, body_markdown = ?, body_rtf = ?, updated_at = ?, deleted_at = ?
         WHERE id = ?;
         """
         var statement: OpaquePointer?
@@ -244,14 +247,15 @@ final class EntryStore {
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, entry.body, -1, SQLITE_TRANSIENT)
-        bindRichText(entry.richTextData, to: statement, at: 2)
-        sqlite3_bind_double(statement, 3, entry.updatedAt.timeIntervalSince1970)
+        bindOptionalText(entry.bodyMarkdown, to: statement, at: 2)
+        bindRichText(entry.richTextData, to: statement, at: 3)
+        sqlite3_bind_double(statement, 4, entry.updatedAt.timeIntervalSince1970)
         if let deletedAt = entry.deletedAt {
-            sqlite3_bind_double(statement, 4, deletedAt.timeIntervalSince1970)
+            sqlite3_bind_double(statement, 5, deletedAt.timeIntervalSince1970)
         } else {
-            sqlite3_bind_null(statement, 4)
+            sqlite3_bind_null(statement, 5)
         }
-        sqlite3_bind_text(statement, 5, entry.id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 6, entry.id, -1, SQLITE_TRANSIENT)
 
         try step(statement)
     }
@@ -441,7 +445,7 @@ final class EntryStore {
 
     func loadColumnValues() throws -> [EntryColumnValueKey: EntryColumnValue] {
         let sql = """
-        SELECT a.entry_id, c.id, a.value_text, a.value_rtf
+        SELECT a.entry_id, c.id, a.value_text, a.value_markdown, a.value_rtf
         FROM assignments a
         JOIN entry_columns c ON c.column_definition_id = a.target_id
         JOIN entries e ON e.id = a.entry_id
@@ -463,18 +467,19 @@ final class EntryStore {
             else { continue }
 
             let richTextData: Data?
-            if sqlite3_column_type(statement, 3) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 4) == SQLITE_NULL {
                 richTextData = nil
-            } else if let bytes = sqlite3_column_blob(statement, 3) {
-                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
+            } else if let bytes = sqlite3_column_blob(statement, 4) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 4)))
             } else {
                 richTextData = nil
             }
+            let markdownText = sqlite3_column_text(statement, 3).map { String(cString: $0) }
 
             values[EntryColumnValueKey(
                 entryID: String(cString: entryIDText),
                 columnID: String(cString: columnIDText)
-            )] = EntryColumnValue(text: String(cString: valueText), richTextData: richTextData)
+            )] = EntryColumnValue(text: String(cString: valueText), markdownText: markdownText, richTextData: richTextData)
         }
 
         return values
@@ -503,10 +508,11 @@ final class EntryStore {
         }
 
         let sql = """
-        INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO entry_column_values (entry_id, column_id, value_text, value_markdown, value_rtf, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(entry_id, column_id) DO UPDATE SET
             value_text = excluded.value_text,
+            value_markdown = excluded.value_markdown,
             value_rtf = excluded.value_rtf,
             updated_at = excluded.updated_at;
         """
@@ -517,9 +523,10 @@ final class EntryStore {
         sqlite3_bind_text(statement, 1, entryID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 2, columnID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 3, value.text, -1, SQLITE_TRANSIENT)
-        bindRichText(value.richTextData, to: statement, at: 4)
-        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+        bindOptionalText(value.markdownText, to: statement, at: 4)
+        bindRichText(value.richTextData, to: statement, at: 5)
         sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -532,12 +539,13 @@ final class EntryStore {
         try copyAssignmentValues(from: sourceDefinitionID, to: targetDefinitionID, updatedAt: updatedAt)
 
         let sql = """
-        INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
-        SELECT entry_id, ?, value_text, value_rtf, ?, ?
+        INSERT INTO entry_column_values (entry_id, column_id, value_text, value_markdown, value_rtf, created_at, updated_at)
+        SELECT entry_id, ?, value_text, value_markdown, value_rtf, ?, ?
         FROM entry_column_values
         WHERE column_id = ?
         ON CONFLICT(entry_id, column_id) DO UPDATE SET
             value_text = excluded.value_text,
+            value_markdown = excluded.value_markdown,
             value_rtf = excluded.value_rtf,
             updated_at = excluded.updated_at;
         """
@@ -566,6 +574,7 @@ final class EntryStore {
         CREATE TABLE IF NOT EXISTS entries (
             id TEXT PRIMARY KEY NOT NULL,
             body_plain_text TEXT NOT NULL,
+            body_markdown TEXT,
             body_rtf BLOB,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
@@ -579,6 +588,9 @@ final class EntryStore {
         """)
         if try !columnExists("body_rtf", in: "entries") {
             try execute("ALTER TABLE entries ADD COLUMN body_rtf BLOB;")
+        }
+        if try !columnExists("body_markdown", in: "entries") {
+            try execute("ALTER TABLE entries ADD COLUMN body_markdown TEXT;")
         }
         try execute("""
         CREATE TABLE IF NOT EXISTS structure_views (
@@ -671,6 +683,7 @@ final class EntryStore {
             entry_id TEXT NOT NULL,
             column_id TEXT NOT NULL,
             value_text TEXT NOT NULL,
+            value_markdown TEXT,
             value_rtf BLOB,
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
@@ -682,6 +695,9 @@ final class EntryStore {
         if try !columnExists("value_rtf", in: "entry_column_values") {
             try execute("ALTER TABLE entry_column_values ADD COLUMN value_rtf BLOB;")
         }
+        if try !columnExists("value_markdown", in: "entry_column_values") {
+            try execute("ALTER TABLE entry_column_values ADD COLUMN value_markdown TEXT;")
+        }
         try execute("""
         CREATE TABLE IF NOT EXISTS assignments (
             id TEXT PRIMARY KEY NOT NULL,
@@ -691,6 +707,7 @@ final class EntryStore {
             target_id TEXT NOT NULL,
             value_kind TEXT NOT NULL,
             value_text TEXT,
+            value_markdown TEXT,
             value_rtf BLOB,
             source TEXT NOT NULL,
             state TEXT NOT NULL,
@@ -705,6 +722,9 @@ final class EntryStore {
             FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
         );
         """)
+        if try !columnExists("value_markdown", in: "assignments") {
+            try execute("ALTER TABLE assignments ADD COLUMN value_markdown TEXT;")
+        }
         try execute("""
         CREATE INDEX IF NOT EXISTS idx_assignments_target
         ON assignments (target_kind, target_id, deleted_at);
@@ -759,7 +779,7 @@ final class EntryStore {
 
     private func migrateLegacyColumnValuesToAssignments() throws {
         let sql = """
-        SELECT v.entry_id, c.column_definition_id, v.value_text, v.value_rtf, v.created_at, v.updated_at
+        SELECT v.entry_id, c.column_definition_id, v.value_text, v.value_markdown, v.value_rtf, v.created_at, v.updated_at
         FROM entry_column_values v
         JOIN entry_columns c ON c.id = v.column_id
         WHERE c.column_definition_id IS NOT NULL;
@@ -777,20 +797,21 @@ final class EntryStore {
             else { continue }
 
             let richTextData: Data?
-            if sqlite3_column_type(statement, 3) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 4) == SQLITE_NULL {
                 richTextData = nil
-            } else if let bytes = sqlite3_column_blob(statement, 3) {
-                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
+            } else if let bytes = sqlite3_column_blob(statement, 4) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 4)))
             } else {
                 richTextData = nil
             }
+            let markdownText = sqlite3_column_text(statement, 3).map { String(cString: $0) }
 
             values.append((
                 entryID: String(cString: entryIDText),
                 definitionID: String(cString: definitionIDText),
-                value: EntryColumnValue(text: String(cString: valueText), richTextData: richTextData),
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
-                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5))
+                value: EntryColumnValue(text: String(cString: valueText), markdownText: markdownText, richTextData: richTextData),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5)),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
             ))
         }
 
@@ -894,13 +915,14 @@ final class EntryStore {
     ) throws {
         let sql = """
         INSERT INTO assignments (
-            id, entry_id, item_id, target_kind, target_id, value_kind, value_text, value_rtf,
+            id, entry_id, item_id, target_kind, target_id, value_kind, value_text, value_markdown, value_rtf,
             source, state, confidence, reason, effective_at, ended_at, created_at, updated_at, deleted_at
         )
-        VALUES (?, ?, NULL, 'column_definition', ?, 'text', ?, ?, 'column_edit', 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
+        VALUES (?, ?, NULL, 'column_definition', ?, 'text', ?, ?, ?, 'column_edit', 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
         ON CONFLICT(entry_id, target_kind, target_id) DO UPDATE SET
             value_kind = excluded.value_kind,
             value_text = excluded.value_text,
+            value_markdown = excluded.value_markdown,
             value_rtf = excluded.value_rtf,
             source = excluded.source,
             state = excluded.state,
@@ -916,9 +938,10 @@ final class EntryStore {
         sqlite3_bind_text(statement, 2, entryID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 3, columnDefinitionID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 4, value.text, -1, SQLITE_TRANSIENT)
-        bindRichText(value.richTextData, to: statement, at: 5)
-        sqlite3_bind_double(statement, 6, creationDate.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
+        bindOptionalText(value.markdownText, to: statement, at: 5)
+        bindRichText(value.richTextData, to: statement, at: 6)
+        sqlite3_bind_double(statement, 7, creationDate.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 8, updatedAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -1141,7 +1164,7 @@ final class EntryStore {
         updatedAt: Date
     ) throws {
         let sql = """
-        SELECT entry_id, value_text, value_rtf, created_at
+        SELECT entry_id, value_text, value_markdown, value_rtf, created_at
         FROM assignments
         WHERE target_kind = 'column_definition'
           AND target_id = ?
@@ -1161,18 +1184,19 @@ final class EntryStore {
             else { continue }
 
             let richTextData: Data?
-            if sqlite3_column_type(statement, 2) == SQLITE_NULL {
+            if sqlite3_column_type(statement, 3) == SQLITE_NULL {
                 richTextData = nil
-            } else if let bytes = sqlite3_column_blob(statement, 2) {
-                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 2)))
+            } else if let bytes = sqlite3_column_blob(statement, 3) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
             } else {
                 richTextData = nil
             }
+            let markdownText = sqlite3_column_text(statement, 2).map { String(cString: $0) }
 
             values.append((
                 entryID: String(cString: entryIDText),
-                value: EntryColumnValue(text: String(cString: valueText), richTextData: richTextData),
-                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+                value: EntryColumnValue(text: String(cString: valueText), markdownText: markdownText, richTextData: richTextData),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
             ))
         }
 
@@ -1254,6 +1278,14 @@ final class EntryStore {
         _ = data.withUnsafeBytes { bytes in
             sqlite3_bind_blob(statement, index, bytes.baseAddress, Int32(data.count), SQLITE_TRANSIENT)
         }
+    }
+
+    private func bindOptionalText(_ text: String?, to statement: OpaquePointer?, at index: Int32) {
+        guard let text else {
+            sqlite3_bind_null(statement, index)
+            return
+        }
+        sqlite3_bind_text(statement, index, text, -1, SQLITE_TRANSIENT)
     }
 
     private func columnExists(_ column: String, in table: String) throws -> Bool {

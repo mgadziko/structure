@@ -146,7 +146,14 @@ struct EntryColumnValueKey: Hashable {
 
 struct EntryColumnValue: Equatable {
     var text: String
+    var markdownText: String?
     var richTextData: Data?
 
-    static let empty = EntryColumnValue(text: "", richTextData: nil)
+    init(text: String, markdownText: String? = nil, richTextData: Data?) {
+        self.text = text
+        self.markdownText = markdownText
+        self.richTextData = richTextData
+    }
+
+    static let empty = EntryColumnValue(text: "", markdownText: nil, richTextData: nil)
 }

@@ -24,6 +24,26 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(entries, [entry])
     }
 
+    func testEntryMarkdownRoundTripsAlongsideRTFCache() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let richTextData = Data("rtf payload".utf8)
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Hello Structure",
+            bodyMarkdown: "**Hello** Structure",
+            richTextData: richTextData,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+
+        try store.insert(entry)
+
+        XCTAssertEqual(try store.loadEntries(), [entry])
+    }
+
     func testLegacyDatabaseMigratesBodyRTFColumn() throws {
         let databaseURL = try temporaryDatabaseURL()
         try createLegacyDatabase(at: databaseURL)
@@ -33,6 +53,7 @@ final class EntryStoreTests: XCTestCase {
 
         XCTAssertEqual(entries.count, 1)
         XCTAssertEqual(entries.first?.body, "Legacy plain text")
+        XCTAssertNil(entries.first?.bodyMarkdown)
         XCTAssertNil(entries.first?.richTextData)
     }
 
@@ -228,6 +249,45 @@ final class EntryStoreTests: XCTestCase {
         )
         XCTAssertEqual(try store.loadColumnValues(), [
             EntryColumnValueKey(entryID: entry.id, columnID: column.id): EntryColumnValue(text: "updated", richTextData: nil)
+        ])
+    }
+
+    func testColumnMarkdownRoundTripsAlongsideRTFCache() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Hello Structure",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let column = EntryColumn(
+            id: "column-1",
+            title: "Attribute",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 120
+        )
+        let value = EntryColumnValue(
+            text: "example",
+            markdownText: "*example*",
+            richTextData: Data("column rtf payload".utf8)
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: column.id,
+            value: value,
+            updatedAt: timestamp
+        )
+
+        XCTAssertEqual(try store.loadColumnValues(), [
+            EntryColumnValueKey(entryID: entry.id, columnID: column.id): value
         ])
     }
 

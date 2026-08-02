@@ -3,6 +3,7 @@ import Foundation
 struct Entry: Identifiable, Equatable {
     let id: String
     var body: String
+    var bodyMarkdown: String? = nil
     var richTextData: Data?
     let createdAt: Date
     var updatedAt: Date

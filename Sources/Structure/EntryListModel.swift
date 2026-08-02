@@ -11,6 +11,7 @@ final class EntryListModel: ObservableObject {
     @Published private(set) var views: [StructureView] = []
     @Published var columns: [EntryColumn] = []
     @Published private var columnValues: [EntryColumnValueKey: EntryColumnValue] = [:]
+    @Published private var categoryNamesByColumnID: [EntryColumn.ID: [String]] = [:]
     @Published private(set) var visibleEntries: [Entry] = []
     @Published private(set) var activeLibraryURL: URL?
     @Published private(set) var allColumnNames: [String] = []
@@ -327,13 +328,19 @@ final class EntryListModel: ObservableObject {
     }
 
     func columnAutocompleteSource(entryID: Entry.ID, columnID: EntryColumn.ID) -> String {
-        visibleEntries
+        let visibleColumnValues = visibleEntries
             .filter { $0.id != entryID }
             .compactMap { entry in
                 let value = columnValue(entryID: entry.id, columnID: columnID).text
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 return value.isEmpty ? nil : value
             }
+
+        let categoryNames = columns.first(where: { $0.id == columnID })?.definition == .category
+            ? categoryNamesByColumnID[columnID] ?? []
+            : []
+
+        return deduplicatedAutocompleteLines(categoryNames + visibleColumnValues)
             .joined(separator: "\n")
     }
 
@@ -527,6 +534,7 @@ final class EntryListModel: ObservableObject {
         entries = try store.loadEntries()
         columns = try store.loadColumns(viewID: activeView?.id ?? StructureView.defaultID)
         columnValues = try store.loadColumnValues()
+        try reloadCategoryNames()
         editingEntryIDs = []
         editingColumnKeys = []
 
@@ -545,6 +553,7 @@ final class EntryListModel: ObservableObject {
         entries = []
         columns = []
         columnValues = [:]
+        categoryNamesByColumnID = [:]
         allColumnNames = []
         currentEntryID = nil
         visibleEntries = []
@@ -581,6 +590,7 @@ final class EntryListModel: ObservableObject {
                 columnValues = try store.loadColumnValues()
             }
             allColumnNames = try store.loadAllColumnNames()
+            try reloadCategoryNames()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -591,6 +601,7 @@ final class EntryListModel: ObservableObject {
         guard let store else { return }
         do {
             try store.upsertColumnValue(entryID: entryID, columnID: columnID, value: value)
+            try reloadCategoryNames()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -634,6 +645,7 @@ final class EntryListModel: ObservableObject {
             try store.updateColumnDefinition(columnID: columnID, definition: definition)
             columns = try store.loadColumns(viewID: activeView?.id ?? StructureView.defaultID)
             allColumnNames = try store.loadAllColumnNames()
+            try reloadCategoryNames()
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
@@ -670,6 +682,7 @@ final class EntryListModel: ObservableObject {
         entries = try store.loadEntries()
         columnValues = try store.loadColumnValues()
         allColumnNames = try store.loadAllColumnNames()
+        try reloadCategoryNames()
         currentEntryID = entries.last?.id
         editingEntryIDs = []
         editingColumnKeys = []
@@ -683,6 +696,32 @@ final class EntryListModel: ObservableObject {
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    private func reloadCategoryNames() throws {
+        guard let store else {
+            categoryNamesByColumnID = [:]
+            return
+        }
+
+        var namesByColumn: [EntryColumn.ID: [String]] = [:]
+        for column in columns where column.definition == .category {
+            namesByColumn[column.id] = try store.loadCategoryNames(columnID: column.id)
+        }
+        categoryNamesByColumnID = namesByColumn
+    }
+
+    private func deduplicatedAutocompleteLines(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        var result: [String] = []
+        for value in values {
+            let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedValue.isEmpty else { continue }
+            if seen.insert(normalizedName(trimmedValue)).inserted {
+                result.append(trimmedValue)
+            }
+        }
+        return result
     }
 
     private func nextViewName() -> String {
