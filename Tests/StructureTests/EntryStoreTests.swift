@@ -121,6 +121,46 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadView(id: view.id)?.title, "Renamed")
     }
 
+    func testDeleteViewHidesViewAndItsColumnsWithoutDeletingEntries() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Keep this Entry",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let view = StructureView(
+            id: "view-1",
+            title: "Temporary View",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        let column = EntryColumn(
+            id: "column-1",
+            viewID: view.id,
+            title: "Temporary Column",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 120
+        )
+
+        try store.insert(entry)
+        try store.insertView(view)
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.deleteView(viewID: view.id, deletedAt: timestamp)
+
+        XCTAssertNil(try store.loadView(id: view.id))
+        XCTAssertFalse(try store.loadViews().contains(view))
+        XCTAssertEqual(try store.loadColumns(viewID: view.id), [])
+        XCTAssertEqual(try store.loadEntries(), [entry])
+    }
+
     func testLegacyColumnsAttachToDefaultViewWithNoDefinition() throws {
         let databaseURL = try temporaryDatabaseURL()
         try createLegacyColumnDatabase(at: databaseURL)

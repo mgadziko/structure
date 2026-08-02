@@ -66,6 +66,41 @@ func openViewSelectionPanel(for model: EntryListModel) {
 }
 
 @MainActor
+func confirmDeleteActiveView(for model: EntryListModel) {
+    guard let view = model.activeView else { return }
+
+    let alert = NSAlert()
+    alert.messageText = "Delete \(view.title). Are you sure?"
+    alert.addButton(withTitle: "Cancel")
+    alert.addButton(withTitle: "OK")
+    alert.alertStyle = .warning
+
+    if alert.runModal() == .alertSecondButtonReturn {
+        model.deleteActiveView()
+    }
+}
+
+@MainActor
+func renameActiveViewPanel(for model: EntryListModel) {
+    guard let view = model.activeView else { return }
+
+    let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+    input.stringValue = view.title
+
+    let alert = NSAlert()
+    alert.messageText = "Rename View"
+    alert.informativeText = "Enter a new name for \(view.title)."
+    alert.accessoryView = input
+    alert.addButton(withTitle: "Rename")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = input
+
+    if alert.runModal() == .alertFirstButtonReturn {
+        model.renameActiveView(to: input.stringValue)
+    }
+}
+
+@MainActor
 func findPanel(for model: EntryListModel) {
     let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
     input.stringValue = model.findText
@@ -171,6 +206,18 @@ struct StructureApp: App {
                 }
                 .keyboardShortcut("-", modifiers: [.command])
                 .disabled(viewZoomScale <= 0.7)
+
+                Divider()
+
+                Button("Rename Current View") {
+                    renameActiveViewPanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+
+                Button("Delete Current View") {
+                    confirmDeleteActiveView(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canDeleteActiveView)
             }
 
             CommandGroup(replacing: .newItem) {

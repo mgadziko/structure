@@ -56,7 +56,7 @@ enum EntryColumnDefinition: String, CaseIterable, Identifiable {
     var symbolName: String? {
         switch self {
         case .none:
-            return nil
+            return "questionmark.circle"
         case .category:
             return "tag"
         case .textAttribute:

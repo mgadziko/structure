@@ -534,10 +534,18 @@ private final class ColumnCellTextView: NSTextView {
         else { return false }
 
         let replacementText = ghostReplacementText
+        let insertionLocation = replacementRange.location + (replacementText as NSString).length
         ghostSuffix = ""
         ghostReplacementRange = nil
         ghostReplacementText = ""
-        insertText(replacementText, replacementRange: replacementRange)
+
+        guard shouldChangeText(in: replacementRange, replacementString: replacementText) else {
+            updateGhostCompletion()
+            return false
+        }
+        textStorage?.replaceCharacters(in: replacementRange, with: replacementText)
+        didChangeText()
+        setSelectedRange(NSRange(location: insertionLocation, length: 0))
         updateGhostCompletion()
         return true
     }

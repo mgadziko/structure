@@ -46,6 +46,10 @@ final class EntryListModel: ObservableObject {
         activeView != nil
     }
 
+    var canDeleteActiveView: Bool {
+        activeView.map { $0.id != StructureView.defaultID } ?? false
+    }
+
     var activeViewTitle: String {
         activeView?.title ?? ""
     }
@@ -170,6 +174,17 @@ final class EntryListModel: ObservableObject {
         visibleEntries = []
         editingEntryIDs = []
         editingColumnKeys = []
+    }
+
+    func deleteActiveView() {
+        guard let store, let activeView, canDeleteActiveView else { return }
+        do {
+            try store.deleteView(viewID: activeView.id)
+            try reloadViews(activeViewID: StructureView.defaultID)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not delete View: \(error)"
+        }
     }
 
     func renameActiveView(to title: String) {

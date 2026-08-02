@@ -351,6 +351,38 @@ final class EntryStore {
         try step(statement)
     }
 
+    func deleteView(viewID: StructureView.ID, deletedAt: Date = Date()) throws {
+        let viewSQL = """
+        UPDATE structure_views
+        SET deleted_at = ?, updated_at = ?
+        WHERE id = ? AND deleted_at IS NULL;
+        """
+        var viewStatement: OpaquePointer?
+        try prepare(viewSQL, statement: &viewStatement)
+        defer { sqlite3_finalize(viewStatement) }
+
+        sqlite3_bind_double(viewStatement, 1, deletedAt.timeIntervalSince1970)
+        sqlite3_bind_double(viewStatement, 2, deletedAt.timeIntervalSince1970)
+        sqlite3_bind_text(viewStatement, 3, viewID, -1, SQLITE_TRANSIENT)
+
+        try step(viewStatement)
+
+        let columnSQL = """
+        UPDATE entry_columns
+        SET deleted_at = ?, updated_at = ?
+        WHERE view_id = ? AND deleted_at IS NULL;
+        """
+        var columnStatement: OpaquePointer?
+        try prepare(columnSQL, statement: &columnStatement)
+        defer { sqlite3_finalize(columnStatement) }
+
+        sqlite3_bind_double(columnStatement, 1, deletedAt.timeIntervalSince1970)
+        sqlite3_bind_double(columnStatement, 2, deletedAt.timeIntervalSince1970)
+        sqlite3_bind_text(columnStatement, 3, viewID, -1, SQLITE_TRANSIENT)
+
+        try step(columnStatement)
+    }
+
     func updateColumnWidth(columnID: EntryColumn.ID, width: Double, updatedAt: Date = Date()) throws {
         let sql = """
         UPDATE entry_columns

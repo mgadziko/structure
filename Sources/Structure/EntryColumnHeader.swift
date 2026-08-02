@@ -371,7 +371,11 @@ private struct UndefinedColumnHeader: View {
                 definition: column.definition,
                 sort: sort,
                 viewScale: viewScale,
-                action: action
+                action: action,
+                definitionAction: {
+                    beginHeaderEditing()
+                    inspectColumn(column)
+                }
             )
             .simultaneousGesture(
                 TapGesture(count: 2)
@@ -510,31 +514,46 @@ private struct SortHeaderButton: View {
     let sort: EntrySort
     let viewScale: CGFloat
     let action: (EntrySortColumn) -> Void
+    var definitionAction: (() -> Void)? = nil
 
     var body: some View {
-        Button {
-            action(column)
-        } label: {
-            HStack(spacing: 4) {
+        HStack(spacing: 4) {
+            Button {
+                action(column)
+            } label: {
                 Text(title)
-                if let definition,
-                   let symbolName = definition.symbolName {
-                    Image(systemName: symbolName)
-                        .font(.system(size: 9 * viewScale, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(definition.displayName)
-                        .help(definition.displayName)
-                }
                 if sort.column == column {
                     Image(systemName: sort.direction == .ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 10 * viewScale, weight: .semibold))
                         .accessibilityHidden(true)
                 }
             }
-            .font(.system(size: 13 * viewScale, weight: .semibold))
-            .foregroundStyle(.blue)
+            .buttonStyle(.plain)
+
+            if let definition,
+               let symbolName = definition.symbolName {
+                if let definitionAction {
+                    Button {
+                        definitionAction()
+                    } label: {
+                        Image(systemName: symbolName)
+                            .font(.system(size: 9 * viewScale, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(definition.displayName) column definition")
+                    .help("Column Info: \(definition.displayName)")
+                } else {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 9 * viewScale, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(definition.displayName)
+                        .help(definition.displayName)
+                }
+            }
         }
-        .buttonStyle(.plain)
+        .font(.system(size: 13 * viewScale, weight: .semibold))
+        .foregroundStyle(.blue)
         .accessibilityLabel("\(title), sorted \(sortDescription)")
     }
 
