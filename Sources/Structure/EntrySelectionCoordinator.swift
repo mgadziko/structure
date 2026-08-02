@@ -23,6 +23,7 @@ final class EntrySelectionCoordinator {
     private var cellTextViews: [StructureCellID: WeakTextView] = [:]
     private var cellIDsByTextViewID: [ObjectIdentifier: StructureCellID] = [:]
     private var cellOrderByEntryID: [Entry.ID: [StructureCellID]] = [:]
+    private var visibleEntryIDs: [Entry.ID] = []
     private weak var activeTextView: NSTextView?
     private weak var lastSelectAllTextView: NSTextView?
     private var lastSelectAllTime: Date?
@@ -63,6 +64,10 @@ final class EntrySelectionCoordinator {
             + columnsAfterEntry.map { .column(entryID: entryID, columnID: $0.id) }
     }
 
+    func updateVisibleEntryOrder(_ entryIDs: [Entry.ID]) {
+        visibleEntryIDs = entryIDs
+    }
+
     func focusEntry(id: Entry.ID) {
         guard let textView = entryTextViews[id]?.textView else { return }
         focusAndPlaceInsertionPoint(in: textView)
@@ -84,12 +89,37 @@ final class EntrySelectionCoordinator {
             targetIndex = currentIndex + 1
         }
 
-        guard rowOrder.indices.contains(targetIndex),
-              let targetTextView = cellTextViews[rowOrder[targetIndex]]?.textView
-        else { return false }
+        if rowOrder.indices.contains(targetIndex),
+           let targetTextView = cellTextViews[rowOrder[targetIndex]]?.textView {
+            focusAndPlaceInsertionPoint(in: targetTextView)
+            return true
+        }
 
-        focusAndPlaceInsertionPoint(in: targetTextView)
+        guard let wrappedTextView = wrappedRowTextView(from: entryID, direction: direction) else {
+            return false
+        }
+
+        focusAndPlaceInsertionPoint(in: wrappedTextView)
         return true
+    }
+
+    private func wrappedRowTextView(from entryID: Entry.ID, direction: CellFocusDirection) -> NSTextView? {
+        guard let rowIndex = visibleEntryIDs.firstIndex(of: entryID) else { return nil }
+
+        let targetRowIndex: Int
+        switch direction {
+        case .left:
+            targetRowIndex = rowIndex - 1
+        case .right:
+            targetRowIndex = rowIndex + 1
+        }
+
+        guard visibleEntryIDs.indices.contains(targetRowIndex),
+              let targetRowOrder = cellOrderByEntryID[visibleEntryIDs[targetRowIndex]],
+              let targetCellID = direction == .right ? targetRowOrder.first : targetRowOrder.last
+        else { return nil }
+
+        return cellTextViews[targetCellID]?.textView
     }
 
     func currentFindAnchor() -> FindAnchor? {
@@ -253,5 +283,6 @@ func handleTabNavigation(in textView: NSTextView, event: NSEvent) -> Bool {
     let direction: CellFocusDirection = event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.shift)
         ? .left
         : .right
-    return EntrySelectionCoordinator.shared.moveFocus(from: textView, direction: direction)
+    _ = EntrySelectionCoordinator.shared.moveFocus(from: textView, direction: direction)
+    return true
 }

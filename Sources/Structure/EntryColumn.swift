@@ -52,6 +52,23 @@ enum EntryColumnDefinition: String, CaseIterable, Identifiable {
             return "Stores changeable state values. History comes later."
         }
     }
+
+    var symbolName: String? {
+        switch self {
+        case .none:
+            return nil
+        case .category:
+            return "tag"
+        case .textAttribute:
+            return "text.quote"
+        case .date:
+            return "calendar"
+        case .number:
+            return "number"
+        case .state:
+            return "circle.lefthalf.filled"
+        }
+    }
 }
 
 enum EntryColumnPlacement {

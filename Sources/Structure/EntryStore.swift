@@ -413,6 +413,10 @@ final class EntryStore {
         sqlite3_bind_text(legacyStatement, 3, definitionID, -1, SQLITE_TRANSIENT)
 
         try step(legacyStatement)
+
+        if definition == .category {
+            try synchronizeCategoryAssignments(forColumnDefinitionID: definitionID, updatedAt: updatedAt)
+        }
     }
 
     func updateColumnOrder(_ columns: [EntryColumn], updatedAt: Date = Date()) throws {
@@ -489,6 +493,14 @@ final class EntryStore {
             value: value,
             updatedAt: updatedAt
         )
+        if try columnDefinitionKind(columnDefinitionID: definitionID) == .category {
+            try upsertCategoryAssignment(
+                entryID: entryID,
+                columnDefinitionID: definitionID,
+                valueText: value.text,
+                updatedAt: updatedAt
+            )
+        }
 
         let sql = """
         INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
@@ -599,6 +611,23 @@ final class EntryStore {
         CREATE UNIQUE INDEX IF NOT EXISTS idx_column_definitions_title
         ON column_definitions (title COLLATE NOCASE)
         WHERE deleted_at IS NULL;
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS categories (
+            id TEXT PRIMARY KEY NOT NULL,
+            column_definition_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            UNIQUE (column_definition_id, normalized_name),
+            FOREIGN KEY (column_definition_id) REFERENCES column_definitions(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("""
+        CREATE INDEX IF NOT EXISTS idx_categories_column_definition
+        ON categories (column_definition_id, deleted_at, normalized_name);
         """)
         try execute("""
         CREATE TABLE IF NOT EXISTS entry_columns (
@@ -892,6 +921,218 @@ final class EntryStore {
         sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
 
         try step(statement)
+    }
+
+    private func synchronizeCategoryAssignments(forColumnDefinitionID columnDefinitionID: String, updatedAt: Date) throws {
+        let sql = """
+        SELECT entry_id, value_text
+        FROM assignments
+        WHERE target_kind = 'column_definition'
+          AND target_id = ?
+          AND deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, columnDefinitionID, -1, SQLITE_TRANSIENT)
+
+        var values: [(entryID: String, valueText: String)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let entryIDText = sqlite3_column_text(statement, 0),
+                let valueText = sqlite3_column_text(statement, 1)
+            else { continue }
+            values.append((String(cString: entryIDText), String(cString: valueText)))
+        }
+
+        for value in values {
+            try upsertCategoryAssignment(
+                entryID: value.entryID,
+                columnDefinitionID: columnDefinitionID,
+                valueText: value.valueText,
+                updatedAt: updatedAt
+            )
+        }
+    }
+
+    private func upsertCategoryAssignment(
+        entryID: Entry.ID,
+        columnDefinitionID: String,
+        valueText: String,
+        updatedAt: Date
+    ) throws {
+        try clearCategoryAssignments(
+            entryID: entryID,
+            columnDefinitionID: columnDefinitionID,
+            updatedAt: updatedAt
+        )
+
+        let trimmedValue = valueText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else { return }
+
+        let categoryID = try upsertCategory(
+            columnDefinitionID: columnDefinitionID,
+            name: trimmedValue,
+            updatedAt: updatedAt
+        )
+        let sql = """
+        INSERT INTO assignments (
+            id, entry_id, item_id, target_kind, target_id, value_kind, value_text, value_rtf,
+            source, state, confidence, reason, effective_at, ended_at, created_at, updated_at, deleted_at
+        )
+        VALUES (?, ?, NULL, 'category', ?, 'category_ref', ?, NULL, 'column_edit', 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
+        ON CONFLICT(entry_id, target_kind, target_id) DO UPDATE SET
+            value_kind = excluded.value_kind,
+            value_text = excluded.value_text,
+            source = excluded.source,
+            state = excluded.state,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, categoryAssignmentID(entryID: entryID, categoryID: categoryID), -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, entryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, categoryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, trimmedValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    private func clearCategoryAssignments(entryID: Entry.ID, columnDefinitionID: String, updatedAt: Date) throws {
+        let sql = """
+        UPDATE assignments
+        SET deleted_at = ?, updated_at = ?
+        WHERE entry_id = ?
+          AND target_kind = 'category'
+          AND target_id IN (
+              SELECT id
+              FROM categories
+              WHERE column_definition_id = ?
+                AND deleted_at IS NULL
+          )
+          AND deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_double(statement, 1, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, entryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, columnDefinitionID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    private func upsertCategory(columnDefinitionID: String, name: String, updatedAt: Date) throws -> String {
+        let normalizedName = normalizedCategoryName(name)
+        let categoryID = categoryID(columnDefinitionID: columnDefinitionID, normalizedName: normalizedName)
+        let sql = """
+        INSERT INTO categories (id, column_definition_id, name, normalized_name, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(column_definition_id, normalized_name) DO UPDATE SET
+            name = excluded.name,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, categoryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, columnDefinitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, name, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, normalizedName, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+        return categoryID
+    }
+
+    func loadCategoryNames(columnID: EntryColumn.ID) throws -> [String] {
+        let definitionID = try columnDefinitionID(forColumnID: columnID)
+        let sql = """
+        SELECT name
+        FROM categories
+        WHERE column_definition_id = ?
+          AND deleted_at IS NULL
+        ORDER BY name COLLATE NOCASE ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, definitionID, -1, SQLITE_TRANSIENT)
+
+        var names: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let nameText = sqlite3_column_text(statement, 0) else { continue }
+            names.append(String(cString: nameText))
+        }
+        return names
+    }
+
+    func loadCategoryAssignments(columnID: EntryColumn.ID) throws -> [Entry.ID: String] {
+        let definitionID = try columnDefinitionID(forColumnID: columnID)
+        let sql = """
+        SELECT a.entry_id, c.name
+        FROM assignments a
+        JOIN categories c ON c.id = a.target_id
+        WHERE a.target_kind = 'category'
+          AND c.column_definition_id = ?
+          AND a.deleted_at IS NULL
+          AND c.deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, definitionID, -1, SQLITE_TRANSIENT)
+
+        var assignments: [Entry.ID: String] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let entryIDText = sqlite3_column_text(statement, 0),
+                let nameText = sqlite3_column_text(statement, 1)
+            else { continue }
+            assignments[String(cString: entryIDText)] = String(cString: nameText)
+        }
+        return assignments
+    }
+
+    private func columnDefinitionKind(columnDefinitionID: String) throws -> EntryColumnDefinition {
+        let sql = """
+        SELECT definition_kind
+        FROM column_definitions
+        WHERE id = ? AND deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, columnDefinitionID, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW else { return .none }
+        return EntryColumnDefinition(storageValue: sqlite3_column_text(statement, 0).map { String(cString: $0) })
+    }
+
+    private func normalizedCategoryName(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func categoryID(columnDefinitionID: String, normalizedName: String) -> String {
+        "category:\(columnDefinitionID):\(normalizedName)"
+    }
+
+    private func categoryAssignmentID(entryID: Entry.ID, categoryID: String) -> String {
+        "assignment:category:\(entryID):\(categoryID)"
     }
 
     private func copyAssignmentValues(

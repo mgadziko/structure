@@ -61,7 +61,14 @@ struct EntryStreamView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .background(Color(nsColor: .textBackgroundColor))
                 .onAppear {
+                    updateVisibleEntryOrder()
                     focusCurrentEntry(proxy: proxy, animated: false)
+                }
+                .onChange(of: model.visibleEntries) { _ in
+                    updateVisibleEntryOrder()
+                }
+                .onChange(of: model.columns) { _ in
+                    updateVisibleEntryOrder()
                 }
                 .onChange(of: model.currentEntryID) { id in
                     focusCurrentEntry(proxy: proxy, animated: id != nil)
@@ -141,5 +148,9 @@ struct EntryStreamView: View {
 
     private func clearEntryFocus() {
         focusedEntryID = nil
+    }
+
+    private func updateVisibleEntryOrder() {
+        EntrySelectionCoordinator.shared.updateVisibleEntryOrder(model.visibleEntries.map(\.id))
     }
 }

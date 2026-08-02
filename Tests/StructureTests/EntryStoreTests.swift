@@ -383,6 +383,101 @@ final class EntryStoreTests: XCTestCase {
             try store.loadColumnValues()[EntryColumnValueKey(entryID: entry.id, columnID: column.id)],
             EntryColumnValue(text: "Sarah", richTextData: nil)
         )
+        XCTAssertEqual(try store.loadCategoryNames(columnID: column.id), ["Sarah"])
+        XCTAssertEqual(try store.loadCategoryAssignments(columnID: column.id), [entry.id: "Sarah"])
+    }
+
+    func testCategoryColumnValueEditReplacesEntryAssignment() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let column = EntryColumn(
+            id: "column-1",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "Sarah", richTextData: nil),
+            updatedAt: timestamp
+        )
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "John", richTextData: nil),
+            updatedAt: timestamp
+        )
+
+        XCTAssertEqual(try store.loadCategoryNames(columnID: column.id), ["John", "Sarah"])
+        XCTAssertEqual(try store.loadCategoryAssignments(columnID: column.id), [entry.id: "John"])
+    }
+
+    func testCategoryColumnReusesCategoryRecordAcrossEntries() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let firstEntry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let secondEntry = Entry(
+            id: "entry-2",
+            body: "Email Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let column = EntryColumn(
+            id: "column-1",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insert(firstEntry)
+        try store.insert(secondEntry)
+        try store.insertColumn(column, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: firstEntry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "Sarah", richTextData: nil),
+            updatedAt: timestamp
+        )
+        try store.upsertColumnValue(
+            entryID: secondEntry.id,
+            columnID: column.id,
+            value: EntryColumnValue(text: "sarah", richTextData: nil),
+            updatedAt: timestamp
+        )
+
+        XCTAssertEqual(try store.loadCategoryNames(columnID: column.id), ["sarah"])
+        XCTAssertEqual(try store.loadCategoryAssignments(columnID: column.id), [
+            firstEntry.id: "sarah",
+            secondEntry.id: "sarah"
+        ])
     }
 
     func testLegacyColumnValuesMigrateRichTextColumn() throws {

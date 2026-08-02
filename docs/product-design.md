@@ -60,6 +60,8 @@ Version 1 is local-only. Sync is not a v1 feature, but the model should avoid ch
 
 The first prototype should prove the core interaction rather than solve every future platform and cloud problem.
 
+See also [Portable Rich Text Direction](portable-rich-text.md) for the current decision that Markdown should become the canonical cross-platform rich-text representation, with macOS RTF treated as a prototype implementation detail or migration source.
+
 ## Library And Window Model
 
 The default user story is one Library per user. A Library is the underlying local database that contains Entries, Items, Attributes, Categories, Assignments, Views, Rules, and change history.

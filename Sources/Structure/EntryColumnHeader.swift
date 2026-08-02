@@ -368,6 +368,7 @@ private struct UndefinedColumnHeader: View {
             SortHeaderButton(
                 title: column.title,
                 column: .userColumn(column.id),
+                definition: column.definition,
                 sort: sort,
                 viewScale: viewScale,
                 action: action
@@ -505,6 +506,7 @@ private struct EntryColumnDropDelegate: DropDelegate {
 private struct SortHeaderButton: View {
     let title: String
     let column: EntrySortColumn
+    var definition: EntryColumnDefinition? = nil
     let sort: EntrySort
     let viewScale: CGFloat
     let action: (EntrySortColumn) -> Void
@@ -515,6 +517,14 @@ private struct SortHeaderButton: View {
         } label: {
             HStack(spacing: 4) {
                 Text(title)
+                if let definition,
+                   let symbolName = definition.symbolName {
+                    Image(systemName: symbolName)
+                        .font(.system(size: 9 * viewScale, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(definition.displayName)
+                        .help(definition.displayName)
+                }
                 if sort.column == column {
                     Image(systemName: sort.direction == .ascending ? "arrow.up" : "arrow.down")
                         .font(.system(size: 10 * viewScale, weight: .semibold))
