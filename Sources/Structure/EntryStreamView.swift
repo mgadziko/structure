@@ -11,9 +11,18 @@ struct EntryStreamView: View {
                 title: model.activeViewTitle,
                 activeViewID: model.activeView?.id,
                 views: model.views,
+                filterSummary: model.activeViewFilterSummary,
+                canFilter: model.canFilterActiveView && !model.columns.isEmpty,
+                canClearFilter: model.canClearActiveViewFilter,
                 hasOpenLibrary: model.hasOpenLibrary,
                 openView: model.openView,
                 createView: model.createView,
+                showCriteria: {
+                    viewCriteriaPanel(for: model)
+                },
+                clearCriteria: {
+                    confirmClearActiveViewCriteria(for: model)
+                },
                 rename: model.renameActiveView,
                 beginEditing: clearEntryFocus
             )
@@ -28,6 +37,7 @@ struct EntryStreamView: View {
                                 showCreatedColumn: model.showCreatedColumn,
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
+                                criteriaColumnID: model.activeViewFilterColumnID,
                                 viewScale: viewScale,
                                 availableColumnNames: model.availableColumnNames,
                                 addColumn: model.addColumn,

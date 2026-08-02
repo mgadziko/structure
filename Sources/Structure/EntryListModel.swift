@@ -68,6 +68,25 @@ final class EntryListModel: ObservableObject {
         activeView?.showsCreatedColumn ?? false
     }
 
+    var activeViewFilterSummary: String? {
+        guard let filter = activeView?.filter,
+              let column = columns.first(where: { $0.id == filter.columnID })
+        else { return nil }
+        return "\(column.title) = \(filter.value)"
+    }
+
+    var canFilterActiveView: Bool {
+        activeView.map { $0.id != StructureView.defaultID } ?? false
+    }
+
+    var canClearActiveViewFilter: Bool {
+        activeView?.filter != nil
+    }
+
+    var activeViewFilterColumnID: EntryColumn.ID? {
+        activeView?.filter?.columnID
+    }
+
     var availableColumnNames: [String] {
         let used = Set(columns.map { normalizedName($0.title) })
         return allColumnNames.filter { !used.contains(normalizedName($0)) }
@@ -90,8 +109,15 @@ final class EntryListModel: ObservableObject {
         )
         entries.append(entry)
         currentEntryID = entry.id
-        refreshVisibleEntries(force: true)
         persistInsert(entry)
+
+        if let filter = activeView?.filter {
+            let value = EntryColumnValue(text: filter.value, richTextData: nil)
+            columnValues[EntryColumnValueKey(entryID: entry.id, columnID: filter.columnID)] = value
+            persistColumnValue(entryID: entry.id, columnID: filter.columnID, value: value)
+        }
+
+        refreshVisibleEntries(force: true)
     }
 
     func openLibrary(at url: URL) {
@@ -201,6 +227,27 @@ final class EntryListModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "Could not rename View: \(error)"
+        }
+    }
+
+    func updateActiveViewFilter(columnID: EntryColumn.ID?, value: String) {
+        guard let store, var activeView else { return }
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filter: ViewFilter?
+        if let columnID, !trimmedValue.isEmpty {
+            filter = ViewFilter(columnID: columnID, value: trimmedValue)
+        } else {
+            filter = nil
+        }
+
+        do {
+            try store.updateViewFilter(viewID: activeView.id, filter: filter)
+            activeView.filter = filter
+            self.activeView = activeView
+            try reloadViews(activeViewID: activeView.id)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not update View criteria: \(error)"
         }
     }
 
@@ -357,6 +404,15 @@ final class EntryListModel: ObservableObject {
 
         return deduplicatedAutocompleteLines(categoryNames + visibleColumnValues)
             .joined(separator: "\n")
+    }
+
+    func criteriaValueSuggestions(columnID: EntryColumn.ID) -> [String] {
+        let values = entries.compactMap { entry in
+            let value = columnValue(entryID: entry.id, columnID: columnID).text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return value.isEmpty ? nil : value
+        }
+        return deduplicatedAutocompleteLines(values)
     }
 
     func updateColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
@@ -533,7 +589,18 @@ final class EntryListModel: ObservableObject {
 
     private func refreshVisibleEntries(force: Bool = false) {
         guard force || !isEditing else { return }
-        visibleEntries = sorted(entries)
+        visibleEntries = sorted(filtered(entries))
+    }
+
+    private func filtered(_ sourceEntries: [Entry]) -> [Entry] {
+        guard let filter = activeView?.filter else { return sourceEntries }
+        let normalizedFilterValue = filter.normalizedValue
+        return sourceEntries.filter { entry in
+            columnValue(entryID: entry.id, columnID: filter.columnID)
+                .text
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased() == normalizedFilterValue
+        }
     }
 
     private func loadLibraryState(from store: EntryStore, createEntryIfEmpty: Bool) throws {

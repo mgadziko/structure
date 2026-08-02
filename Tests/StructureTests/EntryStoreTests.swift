@@ -121,6 +121,69 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadView(id: view.id)?.title, "Renamed")
     }
 
+    func testViewFilterUpdatesRoundTrip() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "Filtered",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        try store.insertView(view)
+        try store.updateViewFilter(
+            viewID: view.id,
+            filter: ViewFilter(columnID: "column-1", value: "Proposal"),
+            updatedAt: timestamp
+        )
+
+        XCTAssertEqual(
+            try store.loadView(id: view.id)?.filter,
+            ViewFilter(columnID: "column-1", value: "Proposal")
+        )
+
+        try store.updateViewFilter(viewID: view.id, filter: nil, updatedAt: timestamp)
+        XCTAssertNil(try store.loadView(id: view.id)?.filter)
+    }
+
+    func testViewFiltersAreScopedToIndividualViews() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let proposalView = StructureView(
+            id: "view-1",
+            title: "Proposal View",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        let budgetView = StructureView(
+            id: "view-2",
+            title: "Budget View",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        try store.insertView(proposalView)
+        try store.insertView(budgetView)
+        try store.updateViewFilter(
+            viewID: proposalView.id,
+            filter: ViewFilter(columnID: "project-column", value: "Proposal"),
+            updatedAt: timestamp
+        )
+
+        XCTAssertEqual(
+            try store.loadView(id: proposalView.id)?.filter,
+            ViewFilter(columnID: "project-column", value: "Proposal")
+        )
+        XCTAssertNil(try store.loadView(id: budgetView.id)?.filter)
+    }
+
     func testDeleteViewHidesViewAndItsColumnsWithoutDeletingEntries() throws {
         let store = try EntryStore(databaseURL: temporaryDatabaseURL())
         let timestamp = Date(timeIntervalSince1970: 10)

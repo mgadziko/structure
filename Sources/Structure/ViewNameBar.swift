@@ -4,9 +4,14 @@ struct ViewControlsBar: View {
     let title: String
     let activeViewID: StructureView.ID?
     let views: [StructureView]
+    let filterSummary: String?
+    let canFilter: Bool
+    let canClearFilter: Bool
     let hasOpenLibrary: Bool
     let openView: (StructureView.ID) -> Void
     let createView: () -> Void
+    let showCriteria: () -> Void
+    let clearCriteria: () -> Void
     let rename: (String) -> Void
     let beginEditing: () -> Void
     @State private var isEditing = false
@@ -78,6 +83,40 @@ struct ViewControlsBar: View {
                 .disabled(title.isEmpty)
                 .help("Rename View")
                 .accessibilityLabel("Rename View")
+
+                Button {
+                    showCriteria()
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canFilter ? .primary : .secondary)
+                .disabled(!canFilter)
+                .help("Add Criteria")
+                .accessibilityLabel("Add Criteria")
+
+                Button {
+                    clearCriteria()
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 24, height: 24)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canClearFilter ? .primary : .secondary)
+                .disabled(!canClearFilter)
+                .help("Clear Criteria")
+                .accessibilityLabel("Clear Criteria")
+
+                if let filterSummary {
+                    Label(filterSummary, systemImage: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .help("View Criteria: \(filterSummary)")
+                }
             }
 
             Spacer()

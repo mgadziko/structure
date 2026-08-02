@@ -8,6 +8,7 @@ struct EntryColumnHeader: View {
     let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
+    let criteriaColumnID: EntryColumn.ID?
     let viewScale: CGFloat
     let availableColumnNames: [String]
     let addColumn: (String, EntryColumnPlacement) -> Void
@@ -61,6 +62,7 @@ struct EntryColumnHeader: View {
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn,
+                    isCriteriaColumn: column.id == criteriaColumnID,
                     viewScale: viewScale
                 )
             }
@@ -98,6 +100,7 @@ struct EntryColumnHeader: View {
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn,
+                    isCriteriaColumn: column.id == criteriaColumnID,
                     viewScale: viewScale
                 )
             }
@@ -270,6 +273,7 @@ private struct UndefinedColumnHeader: View {
     @Binding var draggedColumnID: EntryColumn.ID?
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
+    let isCriteriaColumn: Bool
     let viewScale: CGFloat
     @State private var dragStartWidth: Double?
     @State private var previewWidth: Double?
@@ -371,6 +375,7 @@ private struct UndefinedColumnHeader: View {
                 definition: column.definition,
                 sort: sort,
                 viewScale: viewScale,
+                isCriteriaColumn: isCriteriaColumn,
                 action: action,
                 definitionAction: {
                     beginHeaderEditing()
@@ -458,6 +463,16 @@ private func clampedColumnWidth(_ width: Double) -> Double {
     min(max(width, EntryRowLayout.minimumUndefinedColumnWidth), EntryRowLayout.maximumUndefinedColumnWidth)
 }
 
+private var criteriaHeaderColor: Color {
+    Color(nsColor: NSColor(name: nil) { appearance in
+        let bestMatch = appearance.bestMatch(from: [.darkAqua, .aqua])
+        if bestMatch == .darkAqua {
+            return NSColor(calibratedRed: 0.31, green: 0.92, blue: 0.45, alpha: 1.0)
+        }
+        return NSColor(calibratedRed: 0.0, green: 0.48, blue: 0.18, alpha: 1.0)
+    })
+}
+
 private struct ResizeCursorModifier: ViewModifier {
     func body(content: Content) -> some View {
         content.background(ResizeCursorView())
@@ -513,6 +528,7 @@ private struct SortHeaderButton: View {
     var definition: EntryColumnDefinition? = nil
     let sort: EntrySort
     let viewScale: CGFloat
+    var isCriteriaColumn = false
     let action: (EntrySortColumn) -> Void
     var definitionAction: (() -> Void)? = nil
 
@@ -553,7 +569,7 @@ private struct SortHeaderButton: View {
             }
         }
         .font(.system(size: 13 * viewScale, weight: .semibold))
-        .foregroundStyle(.blue)
+        .foregroundStyle(isCriteriaColumn ? criteriaHeaderColor : .blue)
         .accessibilityLabel("\(title), sorted \(sortDescription)")
     }
 

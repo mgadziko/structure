@@ -17,6 +17,11 @@ func openStructureWindow() {
 }
 
 @MainActor
+func toggleFullScreenForKeyWindow() {
+    NSApp.keyWindow?.toggleFullScreen(nil)
+}
+
+@MainActor
 func openLibraryPanel(for model: EntryListModel) {
     let panel = NSOpenPanel()
     panel.title = "Open Structure Library"
@@ -101,6 +106,49 @@ func renameActiveViewPanel(for model: EntryListModel) {
 }
 
 @MainActor
+func viewCriteriaPanel(for model: EntryListModel) {
+    guard model.hasOpenView else { return }
+    let selector = ViewCriteriaController(
+        columns: model.columns,
+        filter: model.activeView?.filter,
+        valueSuggestions: model.criteriaValueSuggestions
+    )
+
+    let alert = NSAlert()
+    alert.messageText = "View Criteria"
+    alert.informativeText = "Show Entries where a column matches this value."
+    alert.accessoryView = selector.view
+    alert.addButton(withTitle: "Apply")
+    alert.addButton(withTitle: "Clear")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = selector.valueField
+
+    switch alert.runModal() {
+    case .alertFirstButtonReturn:
+        model.updateActiveViewFilter(columnID: selector.selectedColumnID, value: selector.value)
+    case .alertSecondButtonReturn:
+        model.updateActiveViewFilter(columnID: nil, value: "")
+    default:
+        break
+    }
+}
+
+@MainActor
+func confirmClearActiveViewCriteria(for model: EntryListModel) {
+    guard model.canClearActiveViewFilter else { return }
+
+    let alert = NSAlert()
+    alert.messageText = "Clear Criteria Are you sure?"
+    alert.addButton(withTitle: "Cancel")
+    alert.addButton(withTitle: "OK")
+    alert.alertStyle = .warning
+
+    if alert.runModal() == .alertSecondButtonReturn {
+        model.updateActiveViewFilter(columnID: nil, value: "")
+    }
+}
+
+@MainActor
 func findPanel(for model: EntryListModel) {
     let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
     input.stringValue = model.findText
@@ -167,6 +215,77 @@ private final class ViewSelectionController: NSObject, NSTableViewDataSource, NS
     }
 }
 
+private final class ViewCriteriaController: NSObject {
+    let columns: [EntryColumn]
+    let view: NSView
+    let valueField: NSComboBox
+    private let popup: NSPopUpButton
+    private let valueSuggestions: (EntryColumn.ID) -> [String]
+
+    var selectedColumnID: EntryColumn.ID? {
+        guard popup.indexOfSelectedItem >= 0,
+              popup.indexOfSelectedItem < columns.count
+        else { return nil }
+        return columns[popup.indexOfSelectedItem].id
+    }
+
+    var value: String {
+        valueField.stringValue
+    }
+
+    init(
+        columns: [EntryColumn],
+        filter: ViewFilter?,
+        valueSuggestions: @escaping (EntryColumn.ID) -> [String]
+    ) {
+        self.columns = columns.sorted {
+            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+        self.valueSuggestions = valueSuggestions
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 30, width: 280, height: 26), pullsDown: false)
+        for column in self.columns {
+            popup.addItem(withTitle: column.title)
+        }
+        if let filter,
+           let selectedIndex = self.columns.firstIndex(where: { $0.id == filter.columnID }) {
+            popup.selectItem(at: selectedIndex)
+        }
+        popup.isEnabled = !self.columns.isEmpty
+
+        let valueField = NSComboBox(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        valueField.placeholderString = "Value"
+        valueField.stringValue = filter?.value ?? ""
+        valueField.completes = true
+        valueField.numberOfVisibleItems = 10
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 58))
+        container.addSubview(popup)
+        container.addSubview(valueField)
+
+        self.popup = popup
+        self.valueField = valueField
+        self.view = container
+        super.init()
+
+        popup.target = self
+        popup.action = #selector(selectedColumnChanged)
+        reloadValueSuggestions()
+    }
+
+    @objc private func selectedColumnChanged() {
+        reloadValueSuggestions()
+    }
+
+    private func reloadValueSuggestions() {
+        let currentValue = valueField.stringValue
+        valueField.removeAllItems()
+        if let selectedColumnID {
+            valueField.addItems(withObjectValues: valueSuggestions(selectedColumnID))
+        }
+        valueField.stringValue = currentValue
+    }
+}
+
 @main
 struct StructureApp: App {
     @NSApplicationDelegateAdaptor(StructureAppDelegate.self) private var appDelegate
@@ -194,6 +313,14 @@ struct StructureApp: App {
                 .disabled(!model.hasOpenLibrary || !model.hasOpenView)
             }
 
+            CommandGroup(before: .toolbar) {
+                Button("Enter Full Screen") {
+                    toggleFullScreenForKeyWindow()
+                }
+                .keyboardShortcut("f", modifiers: [.control, .command])
+                .disabled(NSApp.keyWindow == nil)
+            }
+
             CommandGroup(after: .toolbar) {
                 Button("Zoom In") {
                     viewZoomScale = min(viewZoomScale + 0.1, 2.0)
@@ -208,6 +335,16 @@ struct StructureApp: App {
                 .disabled(viewZoomScale <= 0.7)
 
                 Divider()
+
+                Button("View Criteria...") {
+                    viewCriteriaPanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canFilterActiveView || model.columns.isEmpty)
+
+                Button("Clear Criteria") {
+                    confirmClearActiveViewCriteria(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canClearActiveViewFilter)
 
                 Button("Rename Current View") {
                     renameActiveViewPanel(for: model)
