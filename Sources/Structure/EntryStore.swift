@@ -154,7 +154,7 @@ final class EntryStore {
     func loadAllColumnNames() throws -> [String] {
         let sql = """
         SELECT DISTINCT title
-        FROM entry_columns
+        FROM column_definitions
         WHERE deleted_at IS NULL
         ORDER BY title COLLATE NOCASE ASC;
         """
@@ -173,10 +173,13 @@ final class EntryStore {
 
     func loadColumnTemplate(named title: String) throws -> EntryColumn? {
         let sql = """
-        SELECT id, view_id, title, placement, order_index, width, definition_kind
-        FROM entry_columns
-        WHERE title = ? COLLATE NOCASE AND deleted_at IS NULL
-        ORDER BY updated_at DESC, created_at DESC
+        SELECT c.id, c.column_definition_id, c.view_id, d.title, c.placement, c.order_index, c.width, d.definition_kind
+        FROM entry_columns c
+        JOIN column_definitions d ON d.id = c.column_definition_id
+        WHERE d.title = ? COLLATE NOCASE
+          AND c.deleted_at IS NULL
+          AND d.deleted_at IS NULL
+        ORDER BY c.updated_at DESC, c.created_at DESC
         LIMIT 1;
         """
         var statement: OpaquePointer?
@@ -187,19 +190,21 @@ final class EntryStore {
 
         guard sqlite3_step(statement) == SQLITE_ROW,
               let idText = sqlite3_column_text(statement, 0),
-              let viewIDText = sqlite3_column_text(statement, 1),
-              let titleText = sqlite3_column_text(statement, 2),
-              let placementText = sqlite3_column_text(statement, 3)
+              let definitionIDText = sqlite3_column_text(statement, 1),
+              let viewIDText = sqlite3_column_text(statement, 2),
+              let titleText = sqlite3_column_text(statement, 3),
+              let placementText = sqlite3_column_text(statement, 4)
         else { return nil }
 
-        let definitionText = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
+        let definitionText = sqlite3_column_text(statement, 7).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
         return EntryColumn(
             id: String(cString: idText),
+            definitionID: String(cString: definitionIDText),
             viewID: String(cString: viewIDText),
             title: String(cString: titleText),
             placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
-            orderIndex: Int(sqlite3_column_int(statement, 4)),
-            width: sqlite3_column_double(statement, 5),
+            orderIndex: Int(sqlite3_column_int(statement, 5)),
+            width: sqlite3_column_double(statement, 6),
             definition: EntryColumnDefinition(rawValue: definitionText) ?? .none
         )
     }
@@ -253,10 +258,14 @@ final class EntryStore {
 
     func loadColumns(viewID: StructureView.ID = StructureView.defaultID) throws -> [EntryColumn] {
         let sql = """
-        SELECT id, view_id, title, placement, order_index, width, definition_kind
+        SELECT c.id, c.column_definition_id, c.view_id, d.title, c.placement, c.order_index, c.width, d.definition_kind
         FROM entry_columns
-        WHERE view_id = ? AND deleted_at IS NULL
-        ORDER BY order_index ASC, created_at ASC;
+        c
+        JOIN column_definitions d ON d.id = c.column_definition_id
+        WHERE c.view_id = ?
+          AND c.deleted_at IS NULL
+          AND d.deleted_at IS NULL
+        ORDER BY c.order_index ASC, c.created_at ASC;
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
@@ -268,19 +277,21 @@ final class EntryStore {
         while sqlite3_step(statement) == SQLITE_ROW {
             guard
                 let idText = sqlite3_column_text(statement, 0),
-                let viewIDText = sqlite3_column_text(statement, 1),
-                let titleText = sqlite3_column_text(statement, 2),
-                let placementText = sqlite3_column_text(statement, 3)
+                let definitionIDText = sqlite3_column_text(statement, 1),
+                let viewIDText = sqlite3_column_text(statement, 2),
+                let titleText = sqlite3_column_text(statement, 3),
+                let placementText = sqlite3_column_text(statement, 4)
             else { continue }
 
-            let definitionText = sqlite3_column_text(statement, 6).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
+            let definitionText = sqlite3_column_text(statement, 7).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
             columns.append(EntryColumn(
                 id: String(cString: idText),
+                definitionID: String(cString: definitionIDText),
                 viewID: String(cString: viewIDText),
                 title: String(cString: titleText),
                 placement: EntryColumnPlacement(rawValue: String(cString: placementText)),
-                orderIndex: Int(sqlite3_column_int(statement, 4)),
-                width: sqlite3_column_double(statement, 5),
+                orderIndex: Int(sqlite3_column_int(statement, 5)),
+                width: sqlite3_column_double(statement, 6),
                 definition: EntryColumnDefinition(rawValue: definitionText) ?? .none
             ))
         }
@@ -289,23 +300,26 @@ final class EntryStore {
     }
 
     func insertColumn(_ column: EntryColumn, createdAt: Date = Date()) throws {
+        try upsertColumnDefinition(for: column, updatedAt: createdAt)
+
         let sql = """
-        INSERT INTO entry_columns (id, view_id, title, placement, order_index, width, definition_kind, created_at, updated_at, deleted_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
+        INSERT INTO entry_columns (id, column_definition_id, view_id, title, placement, order_index, width, definition_kind, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL);
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
         defer { sqlite3_finalize(statement) }
 
         sqlite3_bind_text(statement, 1, column.id, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(statement, 2, column.viewID, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(statement, 3, column.title, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_text(statement, 4, column.placement.rawValue, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_int(statement, 5, Int32(column.orderIndex))
-        sqlite3_bind_double(statement, 6, column.width)
-        sqlite3_bind_text(statement, 7, column.definition.rawValue, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_double(statement, 8, createdAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 2, column.definitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, column.viewID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, column.title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 5, column.placement.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 6, Int32(column.orderIndex))
+        sqlite3_bind_double(statement, 7, column.width)
+        sqlite3_bind_text(statement, 8, column.definition.rawValue, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(statement, 9, createdAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 10, createdAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -365,6 +379,7 @@ final class EntryStore {
         sqlite3_bind_text(statement, 3, columnID, -1, SQLITE_TRANSIENT)
 
         try step(statement)
+        try updateColumnDefinitionTitle(forColumnID: columnID, title: title, updatedAt: updatedAt)
     }
 
     func updateColumnOrder(_ columns: [EntryColumn], updatedAt: Date = Date()) throws {
@@ -389,8 +404,14 @@ final class EntryStore {
 
     func loadColumnValues() throws -> [EntryColumnValueKey: EntryColumnValue] {
         let sql = """
-        SELECT entry_id, column_id, value_text, value_rtf
-        FROM entry_column_values;
+        SELECT a.entry_id, c.id, a.value_text, a.value_rtf
+        FROM assignments a
+        JOIN entry_columns c ON c.column_definition_id = a.target_id
+        JOIN entries e ON e.id = a.entry_id
+        WHERE a.target_kind = 'column_definition'
+          AND a.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND e.deleted_at IS NULL;
         """
         var statement: OpaquePointer?
         try prepare(sql, statement: &statement)
@@ -428,6 +449,14 @@ final class EntryStore {
         value: EntryColumnValue,
         updatedAt: Date = Date()
     ) throws {
+        let definitionID = try columnDefinitionID(forColumnID: columnID)
+        try upsertAssignmentValue(
+            entryID: entryID,
+            columnDefinitionID: definitionID,
+            value: value,
+            updatedAt: updatedAt
+        )
+
         let sql = """
         INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -451,6 +480,12 @@ final class EntryStore {
     }
 
     func copyColumnValues(from sourceColumnID: EntryColumn.ID, to targetColumnID: EntryColumn.ID, updatedAt: Date = Date()) throws {
+        let sourceDefinitionID = try columnDefinitionID(forColumnID: sourceColumnID)
+        let targetDefinitionID = try columnDefinitionID(forColumnID: targetColumnID)
+        guard sourceDefinitionID != targetDefinitionID else { return }
+
+        try copyAssignmentValues(from: sourceDefinitionID, to: targetDefinitionID, updatedAt: updatedAt)
+
         let sql = """
         INSERT INTO entry_column_values (entry_id, column_id, value_text, value_rtf, created_at, updated_at)
         SELECT entry_id, ?, value_text, value_rtf, ?, ?
@@ -517,8 +552,25 @@ final class EntryStore {
             try execute("ALTER TABLE structure_views ADD COLUMN shows_created_column INTEGER NOT NULL DEFAULT 1;")
         }
         try execute("""
+        CREATE TABLE IF NOT EXISTS column_definitions (
+            id TEXT PRIMARY KEY NOT NULL,
+            title TEXT NOT NULL,
+            definition_kind TEXT NOT NULL DEFAULT 'none',
+            default_width REAL NOT NULL DEFAULT 120,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL
+        );
+        """)
+        try execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_column_definitions_title
+        ON column_definitions (title COLLATE NOCASE)
+        WHERE deleted_at IS NULL;
+        """)
+        try execute("""
         CREATE TABLE IF NOT EXISTS entry_columns (
             id TEXT PRIMARY KEY NOT NULL,
+            column_definition_id TEXT NOT NULL,
             view_id TEXT NOT NULL DEFAULT 'default',
             title TEXT NOT NULL,
             placement TEXT NOT NULL,
@@ -528,10 +580,14 @@ final class EntryStore {
             created_at REAL NOT NULL,
             updated_at REAL NOT NULL,
             deleted_at REAL,
+            FOREIGN KEY (column_definition_id) REFERENCES column_definitions(id) ON DELETE RESTRICT,
             FOREIGN KEY (view_id) REFERENCES structure_views(id) ON DELETE CASCADE
         );
         """)
         try ensureDefaultViewExists()
+        if try !columnExists("column_definition_id", in: "entry_columns") {
+            try execute("ALTER TABLE entry_columns ADD COLUMN column_definition_id TEXT;")
+        }
         if try !columnExists("view_id", in: "entry_columns") {
             try execute("ALTER TABLE entry_columns ADD COLUMN view_id TEXT NOT NULL DEFAULT 'default';")
         }
@@ -543,6 +599,7 @@ final class EntryStore {
         }
         try execute("UPDATE entry_columns SET view_id = 'default' WHERE view_id IS NULL OR view_id = '';")
         try execute("UPDATE entry_columns SET definition_kind = 'none' WHERE definition_kind IS NULL OR definition_kind = '';")
+        try backfillColumnDefinitions()
         try execute("""
         CREATE INDEX IF NOT EXISTS idx_entry_columns_order
         ON entry_columns (view_id, deleted_at, order_index, created_at);
@@ -563,6 +620,301 @@ final class EntryStore {
         if try !columnExists("value_rtf", in: "entry_column_values") {
             try execute("ALTER TABLE entry_column_values ADD COLUMN value_rtf BLOB;")
         }
+        try execute("""
+        CREATE TABLE IF NOT EXISTS assignments (
+            id TEXT PRIMARY KEY NOT NULL,
+            entry_id TEXT NOT NULL,
+            item_id TEXT,
+            target_kind TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            value_kind TEXT NOT NULL,
+            value_text TEXT,
+            value_rtf BLOB,
+            source TEXT NOT NULL,
+            state TEXT NOT NULL,
+            confidence REAL,
+            reason TEXT,
+            effective_at REAL,
+            ended_at REAL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            UNIQUE (entry_id, target_kind, target_id),
+            FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("""
+        CREATE INDEX IF NOT EXISTS idx_assignments_target
+        ON assignments (target_kind, target_id, deleted_at);
+        """)
+        try migrateLegacyColumnValuesToAssignments()
+    }
+
+    private func backfillColumnDefinitions() throws {
+        let sql = """
+        SELECT id, title, width, definition_kind, created_at, updated_at
+        FROM entry_columns
+        WHERE deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var columns: [(id: String, definitionID: String, title: String, width: Double, definition: EntryColumnDefinition, createdAt: Date, updatedAt: Date)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idText = sqlite3_column_text(statement, 0),
+                let titleText = sqlite3_column_text(statement, 1)
+            else { continue }
+
+            let title = String(cString: titleText)
+            let definitionText = sqlite3_column_text(statement, 3).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
+            columns.append((
+                id: String(cString: idText),
+                definitionID: EntryColumn.defaultDefinitionID(for: title),
+                title: title,
+                width: sqlite3_column_double(statement, 2),
+                definition: EntryColumnDefinition(rawValue: definitionText) ?? .none,
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5))
+            ))
+        }
+
+        for column in columns {
+            let entryColumn = EntryColumn(
+                id: column.id,
+                definitionID: column.definitionID,
+                title: column.title,
+                placement: .afterEntry,
+                orderIndex: 0,
+                width: column.width,
+                definition: column.definition
+            )
+            try upsertColumnDefinition(for: entryColumn, updatedAt: column.updatedAt)
+            try updateColumnDefinitionID(columnID: column.id, definitionID: column.definitionID)
+        }
+    }
+
+    private func migrateLegacyColumnValuesToAssignments() throws {
+        let sql = """
+        SELECT v.entry_id, c.column_definition_id, v.value_text, v.value_rtf, v.created_at, v.updated_at
+        FROM entry_column_values v
+        JOIN entry_columns c ON c.id = v.column_id
+        WHERE c.column_definition_id IS NOT NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var values: [(entryID: String, definitionID: String, value: EntryColumnValue, createdAt: Date, updatedAt: Date)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let entryIDText = sqlite3_column_text(statement, 0),
+                let definitionIDText = sqlite3_column_text(statement, 1),
+                let valueText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            let richTextData: Data?
+            if sqlite3_column_type(statement, 3) == SQLITE_NULL {
+                richTextData = nil
+            } else if let bytes = sqlite3_column_blob(statement, 3) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 3)))
+            } else {
+                richTextData = nil
+            }
+
+            values.append((
+                entryID: String(cString: entryIDText),
+                definitionID: String(cString: definitionIDText),
+                value: EntryColumnValue(text: String(cString: valueText), richTextData: richTextData),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4)),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 5))
+            ))
+        }
+
+        for value in values {
+            try upsertAssignmentValue(
+                entryID: value.entryID,
+                columnDefinitionID: value.definitionID,
+                value: value.value,
+                createdAt: value.createdAt,
+                updatedAt: value.updatedAt
+            )
+        }
+    }
+
+    private func upsertColumnDefinition(for column: EntryColumn, updatedAt: Date = Date()) throws {
+        let sql = """
+        INSERT INTO column_definitions (id, title, definition_kind, default_width, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            definition_kind = excluded.definition_kind,
+            default_width = excluded.default_width,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, column.definitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, column.title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, column.definition.rawValue, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 4, column.width)
+        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    private func updateColumnDefinitionID(columnID: EntryColumn.ID, definitionID: String) throws {
+        let sql = """
+        UPDATE entry_columns
+        SET column_definition_id = ?
+        WHERE id = ? AND (column_definition_id IS NULL OR column_definition_id = '');
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, definitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, columnID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    private func updateColumnDefinitionTitle(forColumnID columnID: EntryColumn.ID, title: String, updatedAt: Date) throws {
+        let definitionID = try columnDefinitionID(forColumnID: columnID)
+        let sql = """
+        UPDATE column_definitions
+        SET title = ?, updated_at = ?
+        WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, title, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 2, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 3, definitionID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    private func columnDefinitionID(forColumnID columnID: EntryColumn.ID) throws -> String {
+        let sql = """
+        SELECT column_definition_id
+        FROM entry_columns
+        WHERE id = ? AND deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, columnID, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let definitionIDText = sqlite3_column_text(statement, 0)
+        else {
+            throw StructureError.sqlite("Column definition was not available for column \(columnID).")
+        }
+
+        return String(cString: definitionIDText)
+    }
+
+    private func upsertAssignmentValue(
+        entryID: Entry.ID,
+        columnDefinitionID: String,
+        value: EntryColumnValue,
+        createdAt: Date? = nil,
+        updatedAt: Date = Date()
+    ) throws {
+        let sql = """
+        INSERT INTO assignments (
+            id, entry_id, item_id, target_kind, target_id, value_kind, value_text, value_rtf,
+            source, state, confidence, reason, effective_at, ended_at, created_at, updated_at, deleted_at
+        )
+        VALUES (?, ?, NULL, 'column_definition', ?, 'text', ?, ?, 'column_edit', 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
+        ON CONFLICT(entry_id, target_kind, target_id) DO UPDATE SET
+            value_kind = excluded.value_kind,
+            value_text = excluded.value_text,
+            value_rtf = excluded.value_rtf,
+            source = excluded.source,
+            state = excluded.state,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL;
+        """
+        let creationDate = createdAt ?? updatedAt
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, assignmentID(entryID: entryID, columnDefinitionID: columnDefinitionID), -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, entryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, columnDefinitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, value.text, -1, SQLITE_TRANSIENT)
+        bindRichText(value.richTextData, to: statement, at: 5)
+        sqlite3_bind_double(statement, 6, creationDate.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    private func copyAssignmentValues(
+        from sourceDefinitionID: String,
+        to targetDefinitionID: String,
+        updatedAt: Date
+    ) throws {
+        let sql = """
+        SELECT entry_id, value_text, value_rtf, created_at
+        FROM assignments
+        WHERE target_kind = 'column_definition'
+          AND target_id = ?
+          AND deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, sourceDefinitionID, -1, SQLITE_TRANSIENT)
+
+        var values: [(entryID: String, value: EntryColumnValue, createdAt: Date)] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let entryIDText = sqlite3_column_text(statement, 0),
+                let valueText = sqlite3_column_text(statement, 1)
+            else { continue }
+
+            let richTextData: Data?
+            if sqlite3_column_type(statement, 2) == SQLITE_NULL {
+                richTextData = nil
+            } else if let bytes = sqlite3_column_blob(statement, 2) {
+                richTextData = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 2)))
+            } else {
+                richTextData = nil
+            }
+
+            values.append((
+                entryID: String(cString: entryIDText),
+                value: EntryColumnValue(text: String(cString: valueText), richTextData: richTextData),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            ))
+        }
+
+        for value in values {
+            try upsertAssignmentValue(
+                entryID: value.entryID,
+                columnDefinitionID: targetDefinitionID,
+                value: value.value,
+                createdAt: value.createdAt,
+                updatedAt: updatedAt
+            )
+        }
+    }
+
+    private func assignmentID(entryID: Entry.ID, columnDefinitionID: String) -> String {
+        "assignment:column_definition:\(entryID):\(columnDefinitionID)"
     }
 
     private func ensureDefaultViewExists() throws {

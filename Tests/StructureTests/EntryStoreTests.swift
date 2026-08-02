@@ -275,6 +275,7 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(template.title, sourceColumn.title)
         XCTAssertEqual(template.width, sourceColumn.width)
         XCTAssertEqual(template.definition, sourceColumn.definition)
+        XCTAssertEqual(template.definitionID, sourceColumn.definitionID)
 
         try store.insertView(StructureView(
             id: "view-2",
@@ -293,6 +294,59 @@ final class EntryStoreTests: XCTestCase {
         ))
     }
 
+    func testSharedColumnDefinitionRevealsValuesInAnotherViewWithoutCopying() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Hello Structure",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let sourceColumn = EntryColumn(
+            id: "column-source",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+        let targetColumn = EntryColumn(
+            id: "column-target",
+            definitionID: sourceColumn.definitionID,
+            viewID: "view-2",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(sourceColumn, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: sourceColumn.id,
+            value: EntryColumnValue(text: "Sarah", richTextData: nil),
+            updatedAt: timestamp
+        )
+        try store.insertView(StructureView(
+            id: "view-2",
+            title: "People View",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        ))
+        try store.insertColumn(targetColumn, createdAt: timestamp)
+
+        XCTAssertEqual(
+            try store.loadColumnValues()[EntryColumnValueKey(entryID: entry.id, columnID: targetColumn.id)],
+            EntryColumnValue(text: "Sarah", richTextData: nil)
+        )
+    }
+
     func testLegacyColumnValuesMigrateRichTextColumn() throws {
         let databaseURL = try temporaryDatabaseURL()
         try createLegacyColumnValueDatabase(at: databaseURL)
@@ -302,6 +356,40 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadColumnValues(), [
             EntryColumnValueKey(entryID: "entry-1", columnID: "column-1"): EntryColumnValue(text: "legacy value", richTextData: nil)
         ])
+    }
+
+    func testLegacyColumnValuesMigrateIntoSharedAssignments() throws {
+        let databaseURL = try temporaryDatabaseURL()
+        try createLegacyColumnValueDatabase(at: databaseURL)
+
+        let store = try EntryStore(databaseURL: databaseURL)
+        let sourceColumn = try XCTUnwrap(try store.loadColumns().first)
+        let timestamp = Date(timeIntervalSince1970: 10)
+        try store.insertView(StructureView(
+            id: "view-2",
+            title: "New View",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        ))
+        let reusedColumn = EntryColumn(
+            id: "column-reused",
+            definitionID: sourceColumn.definitionID,
+            viewID: "view-2",
+            title: sourceColumn.title,
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: sourceColumn.width,
+            definition: sourceColumn.definition
+        )
+
+        try store.insertColumn(reusedColumn, createdAt: timestamp)
+
+        XCTAssertEqual(
+            try store.loadColumnValues()[EntryColumnValueKey(entryID: "entry-1", columnID: reusedColumn.id)],
+            EntryColumnValue(text: "legacy value", richTextData: nil)
+        )
     }
 
     private func temporaryDatabaseURL() throws -> URL {

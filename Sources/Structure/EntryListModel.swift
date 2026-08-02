@@ -249,6 +249,7 @@ final class EntryListModel: ObservableObject {
         let insertionIndex = columnInsertionIndex(for: placement)
         let column = EntryColumn(
             id: UUID().uuidString,
+            definitionID: template?.definitionID,
             viewID: activeView.id,
             title: template?.title ?? trimmedTitle,
             placement: placement,

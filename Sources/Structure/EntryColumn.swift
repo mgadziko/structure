@@ -31,6 +31,7 @@ enum EntryColumnPlacement {
 
 struct EntryColumn: Identifiable, Equatable {
     let id: String
+    var definitionID: String
     var viewID: StructureView.ID
     var title: String
     var placement: EntryColumnPlacement
@@ -40,6 +41,7 @@ struct EntryColumn: Identifiable, Equatable {
 
     init(
         id: String,
+        definitionID: String? = nil,
         viewID: StructureView.ID = StructureView.defaultID,
         title: String,
         placement: EntryColumnPlacement,
@@ -48,12 +50,27 @@ struct EntryColumn: Identifiable, Equatable {
         definition: EntryColumnDefinition = .none
     ) {
         self.id = id
+        self.definitionID = definitionID ?? Self.defaultDefinitionID(for: title)
         self.viewID = viewID
         self.title = title
         self.placement = placement
         self.orderIndex = orderIndex
         self.width = width
         self.definition = definition
+    }
+
+    static func defaultDefinitionID(for title: String) -> String {
+        let normalizedTitle = title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let slug = normalizedTitle.unicodeScalars.map { scalar in
+            CharacterSet.alphanumerics.contains(scalar) ? String(scalar) : "-"
+        }
+        .joined()
+        .split(separator: "-")
+        .joined(separator: "-")
+
+        return "column-definition-\(slug.isEmpty ? "untitled" : slug)"
     }
 }
 
