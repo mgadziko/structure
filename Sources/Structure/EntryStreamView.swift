@@ -37,7 +37,7 @@ struct EntryStreamView: View {
                                 showCreatedColumn: model.showCreatedColumn,
                                 columnsBeforeEntry: model.columnsBeforeEntry,
                                 columnsAfterEntry: model.columnsAfterEntry,
-                                criteriaColumnID: model.activeViewFilterColumnID,
+                                criteriaColumnIDs: model.activeViewFilterColumnIDs,
                                 viewScale: viewScale,
                                 availableColumnNames: model.availableColumnNames,
                                 addColumn: model.addColumn,

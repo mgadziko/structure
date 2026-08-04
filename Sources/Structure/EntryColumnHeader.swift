@@ -8,7 +8,7 @@ struct EntryColumnHeader: View {
     let showCreatedColumn: Bool
     let columnsBeforeEntry: [EntryColumn]
     let columnsAfterEntry: [EntryColumn]
-    let criteriaColumnID: EntryColumn.ID?
+    let criteriaColumnIDs: Set<EntryColumn.ID>
     let viewScale: CGFloat
     let availableColumnNames: [String]
     let addColumn: (String, EntryColumnPlacement) -> Void
@@ -62,7 +62,7 @@ struct EntryColumnHeader: View {
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn,
-                    isCriteriaColumn: column.id == criteriaColumnID,
+                    isCriteriaColumn: criteriaColumnIDs.contains(column.id),
                     viewScale: viewScale
                 )
             }
@@ -100,7 +100,7 @@ struct EntryColumnHeader: View {
                     draggedColumnID: $draggedColumnID,
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn,
-                    isCriteriaColumn: column.id == criteriaColumnID,
+                    isCriteriaColumn: criteriaColumnIDs.contains(column.id),
                     viewScale: viewScale
                 )
             }

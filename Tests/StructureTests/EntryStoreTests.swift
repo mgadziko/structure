@@ -184,6 +184,59 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertNil(try store.loadView(id: budgetView.id)?.filter)
     }
 
+    func testViewCriteriaUpdateRoundTripsMultipleCriteria() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "Filtered",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        let criteria = [
+            ViewCriterion(id: "criterion-1", columnID: "project-column", value: "Proposal"),
+            ViewCriterion(id: "criterion-2", columnID: "people-column", value: "Sarah Wells")
+        ]
+
+        try store.insertView(view)
+        try store.updateViewCriteria(viewID: view.id, criteria: criteria, updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadView(id: view.id)?.criteria, criteria)
+        XCTAssertEqual(
+            try store.loadView(id: view.id)?.filter,
+            ViewFilter(columnID: "project-column", value: "Proposal")
+        )
+
+        try store.updateViewCriteria(viewID: view.id, criteria: [], updatedAt: timestamp)
+        XCTAssertEqual(try store.loadView(id: view.id)?.criteria, [])
+        XCTAssertNil(try store.loadView(id: view.id)?.filter)
+    }
+
+    func testInsertViewPersistsMultipleCriteria() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let criteria = [
+            ViewCriterion(id: "criterion-1", columnID: "project-column", value: "Proposal"),
+            ViewCriterion(id: "criterion-2", columnID: "people-column", value: "Sarah Wells")
+        ]
+        let view = StructureView(
+            id: "view-1",
+            title: "Filtered",
+            sort: EntrySort(column: .body, direction: .ascending),
+            criteria: criteria,
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        try store.insertView(view)
+
+        XCTAssertEqual(try store.loadView(id: view.id)?.criteria, criteria)
+    }
+
     func testDeleteViewHidesViewAndItsColumnsWithoutDeletingEntries() throws {
         let store = try EntryStore(databaseURL: temporaryDatabaseURL())
         let timestamp = Date(timeIntervalSince1970: 10)

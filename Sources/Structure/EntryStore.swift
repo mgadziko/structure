@@ -96,7 +96,12 @@ final class EntryStore {
 
         var views: [StructureView] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            views.append(view(from: statement))
+            var loadedView = view(from: statement)
+            let criteria = try loadViewCriteria(viewID: loadedView.id)
+            if !criteria.isEmpty {
+                loadedView.criteria = criteria
+            }
+            views.append(loadedView)
         }
 
         return views
@@ -118,7 +123,12 @@ final class EntryStore {
             return nil
         }
 
-        return view(from: statement)
+        var loadedView = view(from: statement)
+        let criteria = try loadViewCriteria(viewID: loadedView.id)
+        if !criteria.isEmpty {
+            loadedView.criteria = criteria
+        }
+        return loadedView
     }
 
     func insertView(_ view: StructureView) throws {
@@ -134,6 +144,10 @@ final class EntryStore {
 
         bindView(view, to: statement)
         try step(statement)
+
+        if !view.criteria.isEmpty {
+            try updateViewCriteria(viewID: view.id, criteria: view.criteria, updatedAt: view.updatedAt)
+        }
     }
 
     func updateViewTitle(viewID: StructureView.ID, title: String, updatedAt: Date = Date()) throws {
@@ -352,6 +366,37 @@ final class EntryStore {
     }
 
     func updateViewFilter(viewID: StructureView.ID, filter: ViewFilter?, updatedAt: Date = Date()) throws {
+        if let filter {
+            try updateViewCriteria(
+                viewID: viewID,
+                criteria: [ViewCriterion(columnID: filter.columnID, value: filter.value)],
+                updatedAt: updatedAt
+            )
+        } else {
+            try updateViewCriteria(viewID: viewID, criteria: [], updatedAt: updatedAt)
+        }
+    }
+
+    func updateViewCriteria(viewID: StructureView.ID, criteria: [ViewCriterion], updatedAt: Date = Date()) throws {
+        try execute("BEGIN TRANSACTION;")
+        do {
+            try updateLegacyViewFilterColumns(viewID: viewID, criterion: criteria.first, updatedAt: updatedAt)
+            try deleteViewCriteria(viewID: viewID)
+            for (index, criterion) in criteria.enumerated() {
+                try insertViewCriterion(criterion, viewID: viewID, orderIndex: index, updatedAt: updatedAt)
+            }
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+    }
+
+    private func updateLegacyViewFilterColumns(
+        viewID: StructureView.ID,
+        criterion: ViewCriterion?,
+        updatedAt: Date
+    ) throws {
         let sql = """
         UPDATE structure_views
         SET filter_column_id = ?, filter_value = ?, updated_at = ?
@@ -361,15 +406,53 @@ final class EntryStore {
         try prepare(sql, statement: &statement)
         defer { sqlite3_finalize(statement) }
 
-        if let filter {
-            sqlite3_bind_text(statement, 1, filter.columnID, -1, SQLITE_TRANSIENT)
-            sqlite3_bind_text(statement, 2, filter.value, -1, SQLITE_TRANSIENT)
+        if let criterion {
+            sqlite3_bind_text(statement, 1, criterion.columnID, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 2, criterion.value, -1, SQLITE_TRANSIENT)
         } else {
             sqlite3_bind_null(statement, 1)
             sqlite3_bind_null(statement, 2)
         }
         sqlite3_bind_double(statement, 3, updatedAt.timeIntervalSince1970)
         sqlite3_bind_text(statement, 4, viewID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    private func deleteViewCriteria(viewID: StructureView.ID) throws {
+        let sql = "DELETE FROM view_criteria WHERE view_id = ?;"
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, viewID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    private func insertViewCriterion(
+        _ criterion: ViewCriterion,
+        viewID: StructureView.ID,
+        orderIndex: Int,
+        updatedAt: Date
+    ) throws {
+        let sql = """
+        INSERT INTO view_criteria (
+            id, view_id, column_id, value_text, order_index, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?);
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, criterion.id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, viewID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, criterion.columnID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, criterion.value, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 5, Int32(orderIndex))
+        sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -671,6 +754,24 @@ final class EntryStore {
         if try !columnExists("filter_value", in: "structure_views") {
             try execute("ALTER TABLE structure_views ADD COLUMN filter_value TEXT;")
         }
+        try execute("""
+        CREATE TABLE IF NOT EXISTS view_criteria (
+            id TEXT PRIMARY KEY NOT NULL,
+            view_id TEXT NOT NULL,
+            column_id TEXT NOT NULL,
+            value_text TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            FOREIGN KEY (view_id) REFERENCES structure_views(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("""
+        CREATE INDEX IF NOT EXISTS idx_view_criteria_order
+        ON view_criteria (view_id, deleted_at, order_index, created_at);
+        """)
+        try migrateLegacyViewFiltersIntoCriteria()
         try execute("""
         CREATE TABLE IF NOT EXISTS column_definitions (
             id TEXT PRIMARY KEY NOT NULL,
@@ -1295,6 +1396,68 @@ final class EntryStore {
         sqlite3_bind_double(statement, 2, now)
 
         try step(statement)
+    }
+
+    private func loadViewCriteria(viewID: StructureView.ID) throws -> [ViewCriterion] {
+        let sql = """
+        SELECT id, column_id, value_text
+        FROM view_criteria
+        WHERE view_id = ? AND deleted_at IS NULL
+        ORDER BY order_index ASC, created_at ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, viewID, -1, SQLITE_TRANSIENT)
+
+        var criteria: [ViewCriterion] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idText = sqlite3_column_text(statement, 0),
+                let columnIDText = sqlite3_column_text(statement, 1),
+                let valueText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            let value = String(cString: valueText)
+            guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            criteria.append(ViewCriterion(
+                id: String(cString: idText),
+                columnID: String(cString: columnIDText),
+                value: value
+            ))
+        }
+
+        return criteria
+    }
+
+    private func migrateLegacyViewFiltersIntoCriteria() throws {
+        let sql = """
+        INSERT INTO view_criteria (
+            id, view_id, column_id, value_text, order_index, created_at, updated_at, deleted_at
+        )
+        SELECT
+            'legacy-filter:' || id,
+            id,
+            filter_column_id,
+            filter_value,
+            0,
+            updated_at,
+            updated_at,
+            NULL
+        FROM structure_views
+        WHERE deleted_at IS NULL
+            AND filter_column_id IS NOT NULL
+            AND TRIM(filter_column_id) != ''
+            AND filter_value IS NOT NULL
+            AND TRIM(filter_value) != ''
+            AND NOT EXISTS (
+                SELECT 1 FROM view_criteria
+                WHERE view_criteria.view_id = structure_views.id
+                    AND view_criteria.deleted_at IS NULL
+            );
+        """
+        try execute(sql)
     }
 
     private func view(from statement: OpaquePointer?) -> StructureView {

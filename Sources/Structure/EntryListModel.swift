@@ -69,10 +69,13 @@ final class EntryListModel: ObservableObject {
     }
 
     var activeViewFilterSummary: String? {
-        guard let filter = activeView?.filter,
-              let column = columns.first(where: { $0.id == filter.columnID })
-        else { return nil }
-        return "\(column.title) = \(filter.value)"
+        guard let criteria = activeView?.criteria, !criteria.isEmpty else { return nil }
+        let summaries = criteria.compactMap { criterion -> String? in
+            guard let column = columns.first(where: { $0.id == criterion.columnID }) else { return nil }
+            return "\(column.title) = \(criterion.value)"
+        }
+        guard !summaries.isEmpty else { return nil }
+        return summaries.joined(separator: " and ")
     }
 
     var canFilterActiveView: Bool {
@@ -80,11 +83,11 @@ final class EntryListModel: ObservableObject {
     }
 
     var canClearActiveViewFilter: Bool {
-        activeView?.filter != nil
+        !(activeView?.criteria.isEmpty ?? true)
     }
 
-    var activeViewFilterColumnID: EntryColumn.ID? {
-        activeView?.filter?.columnID
+    var activeViewFilterColumnIDs: Set<EntryColumn.ID> {
+        Set(activeView?.criteria.map(\.columnID) ?? [])
     }
 
     var availableColumnNames: [String] {
@@ -111,10 +114,10 @@ final class EntryListModel: ObservableObject {
         currentEntryID = entry.id
         persistInsert(entry)
 
-        if let filter = activeView?.filter {
-            let value = EntryColumnValue(text: filter.value, richTextData: nil)
-            columnValues[EntryColumnValueKey(entryID: entry.id, columnID: filter.columnID)] = value
-            persistColumnValue(entryID: entry.id, columnID: filter.columnID, value: value)
+        for criterion in activeView?.criteria ?? [] {
+            let value = EntryColumnValue(text: criterion.value, richTextData: nil)
+            columnValues[EntryColumnValueKey(entryID: entry.id, columnID: criterion.columnID)] = value
+            persistColumnValue(entryID: entry.id, columnID: criterion.columnID, value: value)
         }
 
         refreshVisibleEntries(force: true)
@@ -231,18 +234,26 @@ final class EntryListModel: ObservableObject {
     }
 
     func updateActiveViewFilter(columnID: EntryColumn.ID?, value: String) {
-        guard let store, var activeView else { return }
-        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        let filter: ViewFilter?
-        if let columnID, !trimmedValue.isEmpty {
-            filter = ViewFilter(columnID: columnID, value: trimmedValue)
+        if let columnID {
+            updateActiveViewCriteria([ViewCriterion(columnID: columnID, value: value)])
         } else {
-            filter = nil
+            updateActiveViewCriteria([])
+        }
+    }
+
+    func updateActiveViewCriteria(_ criteria: [ViewCriterion]) {
+        guard let store, var activeView else { return }
+        let cleanedCriteria = criteria.compactMap { criterion -> ViewCriterion? in
+            let trimmedValue = criterion.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !criterion.columnID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !trimmedValue.isEmpty
+            else { return nil }
+            return ViewCriterion(id: criterion.id, columnID: criterion.columnID, value: trimmedValue)
         }
 
         do {
-            try store.updateViewFilter(viewID: activeView.id, filter: filter)
-            activeView.filter = filter
+            try store.updateViewCriteria(viewID: activeView.id, criteria: cleanedCriteria)
+            activeView.criteria = cleanedCriteria
             self.activeView = activeView
             try reloadViews(activeViewID: activeView.id)
             errorMessage = nil
@@ -593,13 +604,14 @@ final class EntryListModel: ObservableObject {
     }
 
     private func filtered(_ sourceEntries: [Entry]) -> [Entry] {
-        guard let filter = activeView?.filter else { return sourceEntries }
-        let normalizedFilterValue = filter.normalizedValue
+        guard let criteria = activeView?.criteria, !criteria.isEmpty else { return sourceEntries }
         return sourceEntries.filter { entry in
-            columnValue(entryID: entry.id, columnID: filter.columnID)
-                .text
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased() == normalizedFilterValue
+            criteria.allSatisfy { criterion in
+                columnValue(entryID: entry.id, columnID: criterion.columnID)
+                    .text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased() == criterion.normalizedValue
+            }
         }
     }
 

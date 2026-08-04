@@ -110,7 +110,7 @@ func viewCriteriaPanel(for model: EntryListModel) {
     guard model.hasOpenView else { return }
     let selector = ViewCriteriaController(
         columns: model.columns,
-        filter: model.activeView?.filter,
+        criteria: model.activeView?.criteria ?? [],
         valueSuggestions: model.criteriaValueSuggestions
     )
 
@@ -125,9 +125,9 @@ func viewCriteriaPanel(for model: EntryListModel) {
 
     switch alert.runModal() {
     case .alertFirstButtonReturn:
-        model.updateActiveViewFilter(columnID: selector.selectedColumnID, value: selector.value)
+        model.updateActiveViewCriteria(selector.criteria)
     case .alertSecondButtonReturn:
-        model.updateActiveViewFilter(columnID: nil, value: "")
+        model.updateActiveViewCriteria([])
     default:
         break
     }
@@ -144,7 +144,7 @@ func confirmClearActiveViewCriteria(for model: EntryListModel) {
     alert.alertStyle = .warning
 
     if alert.runModal() == .alertSecondButtonReturn {
-        model.updateActiveViewFilter(columnID: nil, value: "")
+        model.updateActiveViewCriteria([])
     }
 }
 
@@ -219,6 +219,68 @@ private final class ViewCriteriaController: NSObject {
     let columns: [EntryColumn]
     let view: NSView
     let valueField: NSComboBox
+    private var rows: [CriterionRowController] = []
+    private let valueSuggestions: (EntryColumn.ID) -> [String]
+
+    var criteria: [ViewCriterion] {
+        rows.compactMap { row in
+            guard let columnID = row.selectedColumnID else { return nil }
+            let value = row.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !value.isEmpty else { return nil }
+            return ViewCriterion(id: row.criterionID ?? UUID().uuidString, columnID: columnID, value: value)
+        }
+    }
+
+    init(
+        columns: [EntryColumn],
+        criteria: [ViewCriterion],
+        valueSuggestions: @escaping (EntryColumn.ID) -> [String]
+    ) {
+        self.columns = columns.sorted {
+            $0.title.localizedStandardCompare($1.title) == .orderedAscending
+        }
+        self.valueSuggestions = valueSuggestions
+
+        let rowCount = max(criteria.count + 1, 1)
+        let rowHeight: CGFloat = 32
+        let width: CGFloat = 420
+        let height = CGFloat(rowCount) * rowHeight
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+
+        var firstValueField: NSComboBox?
+        let usedColumnIDs = Set(criteria.map(\.columnID))
+        for index in 0..<rowCount {
+            let criterion = index < criteria.count ? criteria[index] : nil
+            let initialColumnID = criterion?.columnID ?? self.columns.first { !usedColumnIDs.contains($0.id) }?.id
+            let rowFrame = NSRect(
+                x: 0,
+                y: height - CGFloat(index + 1) * rowHeight,
+                width: width,
+                height: 26
+            )
+            let row = CriterionRowController(
+                frame: rowFrame,
+                columns: self.columns,
+                criterion: criterion,
+                initialColumnID: initialColumnID,
+                valueSuggestions: valueSuggestions
+            )
+            rows.append(row)
+            container.addSubview(row.view)
+            firstValueField = firstValueField ?? row.valueField
+        }
+
+        self.valueField = firstValueField ?? NSComboBox(frame: .zero)
+        self.view = container
+        super.init()
+    }
+}
+
+private final class CriterionRowController: NSObject {
+    let view: NSView
+    let valueField: NSComboBox
+    let criterionID: String?
+    private let columns: [EntryColumn]
     private let popup: NSPopUpButton
     private let valueSuggestions: (EntryColumn.ID) -> [String]
 
@@ -234,37 +296,39 @@ private final class ViewCriteriaController: NSObject {
     }
 
     init(
+        frame: NSRect,
         columns: [EntryColumn],
-        filter: ViewFilter?,
+        criterion: ViewCriterion?,
+        initialColumnID: EntryColumn.ID?,
         valueSuggestions: @escaping (EntryColumn.ID) -> [String]
     ) {
-        self.columns = columns.sorted {
-            $0.title.localizedStandardCompare($1.title) == .orderedAscending
-        }
+        self.columns = columns
+        self.criterionID = criterion?.id
         self.valueSuggestions = valueSuggestions
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 30, width: 280, height: 26), pullsDown: false)
-        for column in self.columns {
+
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 190, height: 26), pullsDown: false)
+        for column in columns {
             popup.addItem(withTitle: column.title)
         }
-        if let filter,
-           let selectedIndex = self.columns.firstIndex(where: { $0.id == filter.columnID }) {
+        if let selectedColumnID = criterion?.columnID ?? initialColumnID,
+           let selectedIndex = columns.firstIndex(where: { $0.id == selectedColumnID }) {
             popup.selectItem(at: selectedIndex)
         }
-        popup.isEnabled = !self.columns.isEmpty
+        popup.isEnabled = !columns.isEmpty
 
-        let valueField = NSComboBox(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        let valueField = NSComboBox(frame: NSRect(x: 204, y: 2, width: 216, height: 24))
         valueField.placeholderString = "Value"
-        valueField.stringValue = filter?.value ?? ""
+        valueField.stringValue = criterion?.value ?? ""
         valueField.completes = true
         valueField.numberOfVisibleItems = 10
 
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 58))
-        container.addSubview(popup)
-        container.addSubview(valueField)
+        let rowView = NSView(frame: frame)
+        rowView.addSubview(popup)
+        rowView.addSubview(valueField)
 
         self.popup = popup
         self.valueField = valueField
-        self.view = container
+        self.view = rowView
         super.init()
 
         popup.target = self

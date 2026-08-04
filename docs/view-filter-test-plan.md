@@ -1,6 +1,6 @@
-# View Filter Test Plan
+# View Criteria Test Plan
 
-This plan verifies the first-pass View Criteria workflow.
+This plan verifies the View Criteria workflow.
 
 ## Setup
 
@@ -9,7 +9,7 @@ This plan verifies the first-pass View Criteria workflow.
 3. Use or create a user-created View with at least one secondary column.
 4. Enter repeated values in that column, such as `Proposal`, `Budget`, and `Pledge`.
 
-## Create Criteria
+## Create Single Criteria
 
 1. Open the user-created View.
 2. Choose `View > View Criteria...`.
@@ -21,15 +21,26 @@ This plan verifies the first-pass View Criteria workflow.
 
 Expected result: the View shows only Entries whose selected column value is exactly `Proposal`, ignoring capitalization differences.
 
+## Create Multiple Criteria
+
+1. Open the same user-created View.
+2. Choose `View > View Criteria...`.
+3. Leave the existing `Project = Proposal` row in place.
+4. Use the blank row below it to add another criterion, such as `People = Sarah Wells`.
+5. Confirm the second value field offers autocomplete suggestions from the selected `People` column.
+6. Click `Apply`.
+
+Expected result: the View shows only Entries matching both criteria. The relationship is `AND`, not `OR`.
+
 ## Filter Indicator
 
 1. Look near the View pulldown.
 
-Expected result: a quiet indicator appears showing the current criteria, such as `Project = Proposal`.
+Expected result: a quiet indicator appears showing the current criteria, such as `Project = Proposal and People = Sarah Wells`.
 
-2. Look at the filtered column heading.
+2. Look at the filtered column headings.
 
-Expected result: the column heading for the criteria column is green. In Dark Mode it should be a brighter green; in Light Mode it should be darker.
+Expected result: every column heading used by Criteria is green. In Dark Mode it should be a brighter green; in Light Mode it should be darker.
 
 ## Criteria Toolbar Buttons
 
@@ -59,12 +70,12 @@ Expected result: the criteria clears.
 
 ## Persistence
 
-1. Apply criteria to a user-created View.
+1. Apply multiple Criteria to a user-created View.
 2. Quit Structure.
 3. Relaunch Structure.
 4. Open the same View.
 
-Expected result: the criteria is still active and the filter indicator is visible.
+Expected result: the Criteria are still active and the filter indicator is visible.
 
 ## All Entries
 
@@ -77,18 +88,22 @@ Expected result: `View Criteria...` is unavailable for `All Entries`.
 
 ## Per-View Criteria
 
-1. Apply criteria to one user-created View.
+1. Apply Criteria to one user-created View.
 2. Switch to another View.
 
-Expected result: the second View does not inherit the first View's criteria unless it already had its own criteria set.
+Expected result: the second View does not inherit the first View's Criteria unless it already had its own Criteria set.
+
+3. Switch back to the first View.
+
+Expected result: the first View's Criteria are restored.
 
 ## Column And Sort Behavior
 
-1. Apply criteria to a View.
+1. Apply Criteria to a View.
 2. Sort the visible rows by a column heading.
 
 Expected result: sorting happens within the filtered rows only.
 
-3. Edit a cell so that it no longer matches the criteria.
+3. Edit a cell so that it no longer matches the Criteria.
 
 Expected result: after editing ends or the View refreshes, that row no longer appears in the filtered View.
