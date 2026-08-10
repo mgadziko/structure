@@ -32,6 +32,18 @@ Expected result: the View shows only Entries whose selected column value is exac
 
 Expected result: the View shows only Entries matching both criteria. The relationship is `AND`, not `OR`.
 
+## Edit Multiple Criteria
+
+1. Open a View that already has multiple Criteria.
+2. Choose `View > View Criteria...`.
+
+Expected result: every existing Criterion row is pre-populated with its selected column and value.
+
+3. Click the remove control on one existing Criterion row.
+4. Click `Apply`.
+
+Expected result: only that Criterion is removed. The other Criteria remain active.
+
 ## Filter Indicator
 
 1. Look near the View pulldown.
@@ -51,6 +63,14 @@ Expected result: it opens the same `View Criteria` dialog as the View menu comma
 2. Use the Clear Criteria button beside the View pulldown.
 
 Expected result: it asks for confirmation before clearing criteria.
+
+## Header Criteria Shortcut
+
+1. Apply Criteria to a column.
+2. Look at that column heading.
+3. Click the Criteria icon beside the green heading.
+
+Expected result: the `View Criteria` dialog opens directly.
 
 ## Clear Criteria
 
@@ -96,6 +116,25 @@ Expected result: the second View does not inherit the first View's Criteria unle
 3. Switch back to the first View.
 
 Expected result: the first View's Criteria are restored.
+
+## Save Criteria as Category Rule
+
+1. In a user-created View, make sure at least one visible column is defined as `Category`.
+2. Apply Criteria that identify a meaningful set of rows, such as `Project = Proposal`.
+3. Choose `View > Save Criteria as Category Rule...`.
+4. Select the Category column to fill, such as `People`.
+5. Enter a Category value, such as `Sarah Wells`.
+6. Click `Save Rule`.
+
+Expected result: matching Entries whose target Category cell is empty are filled with the chosen Category value.
+
+7. Edit another Entry so it newly matches the saved Criteria.
+
+Expected result: the target Category cell is filled automatically if it was empty.
+
+8. Repeat with an Entry whose target Category cell already has a different value.
+
+Expected result: the existing explicit Category value is preserved and not overwritten by the rule.
 
 ## Column And Sort Behavior
 

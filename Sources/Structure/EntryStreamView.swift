@@ -45,6 +45,9 @@ struct EntryStreamView: View {
                                 renameColumn: model.renameColumn,
                                 updateColumnDefinition: model.updateColumnDefinition,
                                 resizeColumn: model.resizeColumn,
+                                showCriteria: {
+                                    viewCriteriaPanel(for: model)
+                                },
                                 beginHeaderEditing: clearEntryFocus
                             )
 

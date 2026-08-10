@@ -457,6 +457,127 @@ final class EntryStore {
         try step(statement)
     }
 
+    func upsertCategoryRule(
+        targetColumnDefinitionID: String,
+        categoryName: String,
+        criteria: [CategoryRuleCriterion],
+        updatedAt: Date = Date()
+    ) throws -> CategoryRule {
+        let trimmedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedCriteria = criteria.compactMap { criterion -> CategoryRuleCriterion? in
+            let trimmedValue = criterion.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !criterion.sourceColumnDefinitionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !trimmedValue.isEmpty
+            else { return nil }
+            return CategoryRuleCriterion(
+                id: criterion.id,
+                sourceColumnDefinitionID: criterion.sourceColumnDefinitionID,
+                value: trimmedValue
+            )
+        }
+        guard !targetColumnDefinitionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !trimmedCategoryName.isEmpty,
+              !cleanedCriteria.isEmpty
+        else {
+            throw StructureError.sqlite("Category rule requires a target Category and at least one Criterion.")
+        }
+
+        let existingRuleID = try categoryRuleID(
+            targetColumnDefinitionID: targetColumnDefinitionID,
+            categoryName: trimmedCategoryName
+        )
+        let ruleID = existingRuleID ?? UUID().uuidString
+
+        try execute("BEGIN TRANSACTION;")
+        do {
+            try upsertCategoryRuleRecord(
+                id: ruleID,
+                targetColumnDefinitionID: targetColumnDefinitionID,
+                categoryName: trimmedCategoryName,
+                updatedAt: updatedAt
+            )
+            try deleteCategoryRuleCriteria(ruleID: ruleID)
+            for (index, criterion) in cleanedCriteria.enumerated() {
+                try insertCategoryRuleCriterion(criterion, ruleID: ruleID, orderIndex: index, updatedAt: updatedAt)
+            }
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+
+        return CategoryRule(
+            id: ruleID,
+            targetColumnDefinitionID: targetColumnDefinitionID,
+            categoryName: trimmedCategoryName,
+            criteria: cleanedCriteria,
+            createdAt: updatedAt,
+            updatedAt: updatedAt
+        )
+    }
+
+    func loadCategoryRules() throws -> [CategoryRule] {
+        let sql = """
+        SELECT id, target_column_definition_id, category_name, created_at, updated_at
+        FROM category_rules
+        WHERE deleted_at IS NULL
+        ORDER BY updated_at DESC, created_at DESC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var rules: [CategoryRule] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idText = sqlite3_column_text(statement, 0),
+                let targetDefinitionText = sqlite3_column_text(statement, 1),
+                let categoryNameText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            let ruleID = String(cString: idText)
+            rules.append(CategoryRule(
+                id: ruleID,
+                targetColumnDefinitionID: String(cString: targetDefinitionText),
+                categoryName: String(cString: categoryNameText),
+                criteria: try loadCategoryRuleCriteria(ruleID: ruleID),
+                createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 3)),
+                updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 4))
+            ))
+        }
+
+        return rules
+    }
+
+    func applyCategoryRulesToAllEntries(updatedAt: Date = Date()) throws {
+        let entries = try loadEntries()
+        for entry in entries {
+            try applyCategoryRules(toEntryID: entry.id, updatedAt: updatedAt)
+        }
+    }
+
+    func applyCategoryRules(toEntryID entryID: Entry.ID, updatedAt: Date = Date()) throws {
+        let rules = try loadCategoryRules()
+        for rule in rules where try categoryRule(rule, matchesEntryID: entryID) {
+            if try assignmentValue(entryID: entryID, columnDefinitionID: rule.targetColumnDefinitionID) == nil {
+                try upsertAssignmentValue(
+                    entryID: entryID,
+                    columnDefinitionID: rule.targetColumnDefinitionID,
+                    value: EntryColumnValue(text: rule.categoryName, richTextData: nil),
+                    updatedAt: updatedAt,
+                    source: "category_rule"
+                )
+                try upsertCategoryAssignment(
+                    entryID: entryID,
+                    columnDefinitionID: rule.targetColumnDefinitionID,
+                    valueText: rule.categoryName,
+                    updatedAt: updatedAt,
+                    source: "category_rule"
+                )
+            }
+        }
+    }
+
     func deleteView(viewID: StructureView.ID, deletedAt: Date = Date()) throws {
         let viewSQL = """
         UPDATE structure_views
@@ -806,6 +927,39 @@ final class EntryStore {
         ON categories (column_definition_id, deleted_at, normalized_name);
         """)
         try execute("""
+        CREATE TABLE IF NOT EXISTS category_rules (
+            id TEXT PRIMARY KEY NOT NULL,
+            target_column_definition_id TEXT NOT NULL,
+            category_name TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            FOREIGN KEY (target_column_definition_id) REFERENCES column_definitions(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("""
+        CREATE INDEX IF NOT EXISTS idx_category_rules_target
+        ON category_rules (target_column_definition_id, deleted_at);
+        """)
+        try execute("""
+        CREATE TABLE IF NOT EXISTS category_rule_criteria (
+            id TEXT PRIMARY KEY NOT NULL,
+            rule_id TEXT NOT NULL,
+            source_column_definition_id TEXT NOT NULL,
+            value_text TEXT NOT NULL,
+            order_index INTEGER NOT NULL,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL,
+            deleted_at REAL,
+            FOREIGN KEY (rule_id) REFERENCES category_rules(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_column_definition_id) REFERENCES column_definitions(id) ON DELETE CASCADE
+        );
+        """)
+        try execute("""
+        CREATE INDEX IF NOT EXISTS idx_category_rule_criteria_order
+        ON category_rule_criteria (rule_id, deleted_at, order_index, created_at);
+        """)
+        try execute("""
         CREATE TABLE IF NOT EXISTS entry_columns (
             id TEXT PRIMARY KEY NOT NULL,
             column_definition_id TEXT NOT NULL,
@@ -1075,14 +1229,15 @@ final class EntryStore {
         columnDefinitionID: String,
         value: EntryColumnValue,
         createdAt: Date? = nil,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        source: String = "column_edit"
     ) throws {
         let sql = """
         INSERT INTO assignments (
             id, entry_id, item_id, target_kind, target_id, value_kind, value_text, value_markdown, value_rtf,
             source, state, confidence, reason, effective_at, ended_at, created_at, updated_at, deleted_at
         )
-        VALUES (?, ?, NULL, 'column_definition', ?, 'text', ?, ?, ?, 'column_edit', 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
+        VALUES (?, ?, NULL, 'column_definition', ?, 'text', ?, ?, ?, ?, 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
         ON CONFLICT(entry_id, target_kind, target_id) DO UPDATE SET
             value_kind = excluded.value_kind,
             value_text = excluded.value_text,
@@ -1104,8 +1259,9 @@ final class EntryStore {
         sqlite3_bind_text(statement, 4, value.text, -1, SQLITE_TRANSIENT)
         bindOptionalText(value.markdownText, to: statement, at: 5)
         bindRichText(value.richTextData, to: statement, at: 6)
-        sqlite3_bind_double(statement, 7, creationDate.timeIntervalSince1970)
-        sqlite3_bind_double(statement, 8, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 7, source, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 8, creationDate.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 9, updatedAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -1147,7 +1303,8 @@ final class EntryStore {
         entryID: Entry.ID,
         columnDefinitionID: String,
         valueText: String,
-        updatedAt: Date
+        updatedAt: Date,
+        source: String = "column_edit"
     ) throws {
         try clearCategoryAssignments(
             entryID: entryID,
@@ -1168,7 +1325,7 @@ final class EntryStore {
             id, entry_id, item_id, target_kind, target_id, value_kind, value_text, value_rtf,
             source, state, confidence, reason, effective_at, ended_at, created_at, updated_at, deleted_at
         )
-        VALUES (?, ?, NULL, 'category', ?, 'category_ref', ?, NULL, 'column_edit', 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
+        VALUES (?, ?, NULL, 'category', ?, 'category_ref', ?, NULL, ?, 'explicit', NULL, NULL, NULL, NULL, ?, ?, NULL)
         ON CONFLICT(entry_id, target_kind, target_id) DO UPDATE SET
             value_kind = excluded.value_kind,
             value_text = excluded.value_text,
@@ -1185,8 +1342,9 @@ final class EntryStore {
         sqlite3_bind_text(statement, 2, entryID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 3, categoryID, -1, SQLITE_TRANSIENT)
         sqlite3_bind_text(statement, 4, trimmedValue, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_text(statement, 5, source, -1, SQLITE_TRANSIENT)
         sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
 
         try step(statement)
     }
@@ -1241,6 +1399,164 @@ final class EntryStore {
 
         try step(statement)
         return categoryID
+    }
+
+    private func upsertCategoryRuleRecord(
+        id: String,
+        targetColumnDefinitionID: String,
+        categoryName: String,
+        updatedAt: Date
+    ) throws {
+        let sql = """
+        INSERT INTO category_rules (id, target_column_definition_id, category_name, created_at, updated_at, deleted_at)
+        VALUES (?, ?, ?, ?, ?, NULL)
+        ON CONFLICT(id) DO UPDATE SET
+            target_column_definition_id = excluded.target_column_definition_id,
+            category_name = excluded.category_name,
+            updated_at = excluded.updated_at,
+            deleted_at = NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, targetColumnDefinitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, categoryName, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_double(statement, 4, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 5, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    private func insertCategoryRuleCriterion(
+        _ criterion: CategoryRuleCriterion,
+        ruleID: CategoryRule.ID,
+        orderIndex: Int,
+        updatedAt: Date
+    ) throws {
+        let sql = """
+        INSERT INTO category_rule_criteria (
+            id, rule_id, source_column_definition_id, value_text, order_index, created_at, updated_at, deleted_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, NULL);
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, criterion.id, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, ruleID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 3, criterion.sourceColumnDefinitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 4, criterion.value, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_int(statement, 5, Int32(orderIndex))
+        sqlite3_bind_double(statement, 6, updatedAt.timeIntervalSince1970)
+        sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
+
+        try step(statement)
+    }
+
+    private func deleteCategoryRuleCriteria(ruleID: CategoryRule.ID) throws {
+        let sql = "DELETE FROM category_rule_criteria WHERE rule_id = ?;"
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, ruleID, -1, SQLITE_TRANSIENT)
+
+        try step(statement)
+    }
+
+    private func loadCategoryRuleCriteria(ruleID: CategoryRule.ID) throws -> [CategoryRuleCriterion] {
+        let sql = """
+        SELECT id, source_column_definition_id, value_text
+        FROM category_rule_criteria
+        WHERE rule_id = ? AND deleted_at IS NULL
+        ORDER BY order_index ASC, created_at ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, ruleID, -1, SQLITE_TRANSIENT)
+
+        var criteria: [CategoryRuleCriterion] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idText = sqlite3_column_text(statement, 0),
+                let definitionIDText = sqlite3_column_text(statement, 1),
+                let valueText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            criteria.append(CategoryRuleCriterion(
+                id: String(cString: idText),
+                sourceColumnDefinitionID: String(cString: definitionIDText),
+                value: String(cString: valueText)
+            ))
+        }
+
+        return criteria
+    }
+
+    private func categoryRuleID(targetColumnDefinitionID: String, categoryName: String) throws -> String? {
+        let sql = """
+        SELECT id
+        FROM category_rules
+        WHERE target_column_definition_id = ?
+          AND lower(category_name) = lower(?)
+          AND deleted_at IS NULL
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, targetColumnDefinitionID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, categoryName, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let idText = sqlite3_column_text(statement, 0)
+        else { return nil }
+        return String(cString: idText)
+    }
+
+    private func categoryRule(_ rule: CategoryRule, matchesEntryID entryID: Entry.ID) throws -> Bool {
+        guard !rule.criteria.isEmpty else { return false }
+        for criterion in rule.criteria {
+            guard let value = try assignmentValue(
+                entryID: entryID,
+                columnDefinitionID: criterion.sourceColumnDefinitionID
+            ) else { return false }
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != criterion.normalizedValue {
+                return false
+            }
+        }
+        return true
+    }
+
+    private func assignmentValue(entryID: Entry.ID, columnDefinitionID: String) throws -> String? {
+        let sql = """
+        SELECT value_text
+        FROM assignments
+        WHERE entry_id = ?
+          AND target_kind = 'column_definition'
+          AND target_id = ?
+          AND deleted_at IS NULL
+        LIMIT 1;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        sqlite3_bind_text(statement, 1, entryID, -1, SQLITE_TRANSIENT)
+        sqlite3_bind_text(statement, 2, columnDefinitionID, -1, SQLITE_TRANSIENT)
+
+        guard sqlite3_step(statement) == SQLITE_ROW,
+              let valueText = sqlite3_column_text(statement, 0)
+        else { return nil }
+
+        let value = String(cString: valueText).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
     }
 
     func loadCategoryNames(columnID: EntryColumn.ID) throws -> [String] {

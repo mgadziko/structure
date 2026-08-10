@@ -134,6 +134,32 @@ func viewCriteriaPanel(for model: EntryListModel) {
 }
 
 @MainActor
+func saveCriteriaAsCategoryRulePanel(for model: EntryListModel) {
+    guard model.canSaveActiveCriteriaAsCategoryRule else { return }
+
+    let controller = CategoryRuleController(
+        targetColumns: model.categoryRuleTargetColumns,
+        defaultCategoryName: model.activeViewTitle
+    )
+
+    let alert = NSAlert()
+    alert.messageText = "Save Criteria as Category Rule"
+    alert.informativeText = "When Entries match this View's Criteria, fill an empty Category cell with this value."
+    alert.accessoryView = controller.view
+    alert.addButton(withTitle: "Save Rule")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = controller.categoryField
+
+    if alert.runModal() == .alertFirstButtonReturn,
+       let targetColumnID = controller.selectedTargetColumnID {
+        model.saveActiveViewCriteriaAsCategoryRule(
+            targetColumnID: targetColumnID,
+            categoryName: controller.categoryName
+        )
+    }
+}
+
+@MainActor
 func confirmClearActiveViewCriteria(for model: EntryListModel) {
     guard model.canClearActiveViewFilter else { return }
 
@@ -224,6 +250,7 @@ private final class ViewCriteriaController: NSObject {
 
     var criteria: [ViewCriterion] {
         rows.compactMap { row in
+            guard !row.isRemoved else { return nil }
             guard let columnID = row.selectedColumnID else { return nil }
             let value = row.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !value.isEmpty else { return nil }
@@ -280,8 +307,10 @@ private final class CriterionRowController: NSObject {
     let view: NSView
     let valueField: NSComboBox
     let criterionID: String?
+    private(set) var isRemoved = false
     private let columns: [EntryColumn]
     private let popup: NSPopUpButton
+    private let removeButton: NSButton
     private let valueSuggestions: (EntryColumn.ID) -> [String]
 
     var selectedColumnID: EntryColumn.ID? {
@@ -306,7 +335,7 @@ private final class CriterionRowController: NSObject {
         self.criterionID = criterion?.id
         self.valueSuggestions = valueSuggestions
 
-        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 190, height: 26), pullsDown: false)
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 0, width: 170, height: 26), pullsDown: false)
         for column in columns {
             popup.addItem(withTitle: column.title)
         }
@@ -316,23 +345,34 @@ private final class CriterionRowController: NSObject {
         }
         popup.isEnabled = !columns.isEmpty
 
-        let valueField = NSComboBox(frame: NSRect(x: 204, y: 2, width: 216, height: 24))
+        let valueField = NSComboBox(frame: NSRect(x: 184, y: 2, width: 200, height: 24))
         valueField.placeholderString = "Value"
         valueField.stringValue = criterion?.value ?? ""
         valueField.completes = true
         valueField.numberOfVisibleItems = 10
 
+        let removeButton = NSButton(frame: NSRect(x: 392, y: 1, width: 28, height: 24))
+        removeButton.bezelStyle = .inline
+        removeButton.image = NSImage(systemSymbolName: "minus.circle", accessibilityDescription: "Remove Criterion")
+        removeButton.title = ""
+        removeButton.isBordered = false
+        removeButton.isHidden = criterion == nil
+
         let rowView = NSView(frame: frame)
         rowView.addSubview(popup)
         rowView.addSubview(valueField)
+        rowView.addSubview(removeButton)
 
         self.popup = popup
         self.valueField = valueField
+        self.removeButton = removeButton
         self.view = rowView
         super.init()
 
         popup.target = self
         popup.action = #selector(selectedColumnChanged)
+        removeButton.target = self
+        removeButton.action = #selector(removeCriterion)
         reloadValueSuggestions()
     }
 
@@ -347,6 +387,55 @@ private final class CriterionRowController: NSObject {
             valueField.addItems(withObjectValues: valueSuggestions(selectedColumnID))
         }
         valueField.stringValue = currentValue
+    }
+
+    @objc private func removeCriterion() {
+        isRemoved = true
+        valueField.stringValue = ""
+        popup.isEnabled = false
+        valueField.isEnabled = false
+        removeButton.isEnabled = false
+        view.alphaValue = 0.35
+    }
+}
+
+private final class CategoryRuleController: NSObject {
+    let view: NSView
+    let categoryField: NSTextField
+    private let targetColumns: [EntryColumn]
+    private let popup: NSPopUpButton
+
+    var selectedTargetColumnID: EntryColumn.ID? {
+        guard popup.indexOfSelectedItem >= 0,
+              popup.indexOfSelectedItem < targetColumns.count
+        else { return nil }
+        return targetColumns[popup.indexOfSelectedItem].id
+    }
+
+    var categoryName: String {
+        categoryField.stringValue
+    }
+
+    init(targetColumns: [EntryColumn], defaultCategoryName: String) {
+        self.targetColumns = targetColumns
+        let popup = NSPopUpButton(frame: NSRect(x: 0, y: 34, width: 320, height: 26), pullsDown: false)
+        for column in targetColumns {
+            popup.addItem(withTitle: column.title)
+        }
+        popup.isEnabled = !targetColumns.isEmpty
+
+        let categoryField = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        categoryField.placeholderString = "Category"
+        categoryField.stringValue = defaultCategoryName
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 62))
+        container.addSubview(popup)
+        container.addSubview(categoryField)
+
+        self.popup = popup
+        self.categoryField = categoryField
+        self.view = container
+        super.init()
     }
 }
 
@@ -409,6 +498,11 @@ struct StructureApp: App {
                     confirmClearActiveViewCriteria(for: model)
                 }
                 .disabled(!model.hasOpenLibrary || !model.canClearActiveViewFilter)
+
+                Button("Save Criteria as Category Rule...") {
+                    saveCriteriaAsCategoryRulePanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canSaveActiveCriteriaAsCategoryRule)
 
                 Button("Rename Current View") {
                     renameActiveViewPanel(for: model)

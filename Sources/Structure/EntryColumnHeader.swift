@@ -16,6 +16,7 @@ struct EntryColumnHeader: View {
     let renameColumn: (EntryColumn.ID, String) -> Void
     let updateColumnDefinition: (EntryColumn.ID, EntryColumnDefinition) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
+    let showCriteria: () -> Void
     let beginHeaderEditing: () -> Void
     @State private var draftColumnPlacement: EntryColumnPlacement?
     @State private var draftColumnTitle = ""
@@ -63,6 +64,7 @@ struct EntryColumnHeader: View {
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn,
                     isCriteriaColumn: criteriaColumnIDs.contains(column.id),
+                    showCriteria: showCriteria,
                     viewScale: viewScale
                 )
             }
@@ -101,6 +103,7 @@ struct EntryColumnHeader: View {
                     moveColumn: moveColumn,
                     resizeColumn: resizeColumn,
                     isCriteriaColumn: criteriaColumnIDs.contains(column.id),
+                    showCriteria: showCriteria,
                     viewScale: viewScale
                 )
             }
@@ -274,6 +277,7 @@ private struct UndefinedColumnHeader: View {
     let moveColumn: (EntryColumn.ID, EntryColumn.ID, ColumnDropPlacement) -> Void
     let resizeColumn: (EntryColumn.ID, Double) -> Void
     let isCriteriaColumn: Bool
+    let showCriteria: () -> Void
     let viewScale: CGFloat
     @State private var dragStartWidth: Double?
     @State private var previewWidth: Double?
@@ -377,6 +381,10 @@ private struct UndefinedColumnHeader: View {
                 viewScale: viewScale,
                 isCriteriaColumn: isCriteriaColumn,
                 action: action,
+                criteriaAction: isCriteriaColumn ? {
+                    beginHeaderEditing()
+                    showCriteria()
+                } : nil,
                 definitionAction: {
                     beginHeaderEditing()
                     inspectColumn(column)
@@ -530,6 +538,7 @@ private struct SortHeaderButton: View {
     let viewScale: CGFloat
     var isCriteriaColumn = false
     let action: (EntrySortColumn) -> Void
+    var criteriaAction: (() -> Void)? = nil
     var definitionAction: (() -> Void)? = nil
 
     var body: some View {
@@ -545,6 +554,19 @@ private struct SortHeaderButton: View {
                 }
             }
             .buttonStyle(.plain)
+
+            if let criteriaAction {
+                Button {
+                    criteriaAction()
+                } label: {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.system(size: 9 * viewScale, weight: .semibold))
+                        .foregroundStyle(criteriaHeaderColor)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("View Criteria")
+                .help("View Criteria")
+            }
 
             if let definition,
                let symbolName = definition.symbolName {

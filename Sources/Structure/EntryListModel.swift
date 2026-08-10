@@ -90,6 +90,21 @@ final class EntryListModel: ObservableObject {
         Set(activeView?.criteria.map(\.columnID) ?? [])
     }
 
+    var canSaveActiveCriteriaAsCategoryRule: Bool {
+        guard canFilterActiveView,
+              !(activeView?.criteria.isEmpty ?? true)
+        else { return false }
+        return columns.contains { $0.definition == .category }
+    }
+
+    var categoryRuleTargetColumns: [EntryColumn] {
+        columns
+            .filter { $0.definition == .category }
+            .sorted { lhs, rhs in
+                lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+    }
+
     var availableColumnNames: [String] {
         let used = Set(columns.map { normalizedName($0.title) })
         return allColumnNames.filter { !used.contains(normalizedName($0)) }
@@ -119,6 +134,7 @@ final class EntryListModel: ObservableObject {
             columnValues[EntryColumnValueKey(entryID: entry.id, columnID: criterion.columnID)] = value
             persistColumnValue(entryID: entry.id, columnID: criterion.columnID, value: value)
         }
+        applyCategoryRules(toEntryID: entry.id)
 
         refreshVisibleEntries(force: true)
     }
@@ -259,6 +275,41 @@ final class EntryListModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = "Could not update View criteria: \(error)"
+        }
+    }
+
+    func saveActiveViewCriteriaAsCategoryRule(targetColumnID: EntryColumn.ID, categoryName: String) {
+        guard let store,
+              let activeView,
+              !activeView.criteria.isEmpty,
+              let targetColumn = columns.first(where: { $0.id == targetColumnID && $0.definition == .category })
+        else { return }
+
+        let trimmedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCategoryName.isEmpty else { return }
+
+        let ruleCriteria = activeView.criteria.compactMap { criterion -> CategoryRuleCriterion? in
+            guard let sourceColumn = columns.first(where: { $0.id == criterion.columnID }) else { return nil }
+            return CategoryRuleCriterion(
+                sourceColumnDefinitionID: sourceColumn.definitionID,
+                value: criterion.value
+            )
+        }
+        guard !ruleCriteria.isEmpty else { return }
+
+        do {
+            _ = try store.upsertCategoryRule(
+                targetColumnDefinitionID: targetColumn.definitionID,
+                categoryName: trimmedCategoryName,
+                criteria: ruleCriteria
+            )
+            try store.applyCategoryRulesToAllEntries()
+            columnValues = try store.loadColumnValues()
+            try reloadCategoryNames()
+            refreshVisibleEntries(force: true)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not save Category rule: \(error)"
         }
     }
 
@@ -431,6 +482,7 @@ final class EntryListModel: ObservableObject {
         guard columnValues[key] != value else { return }
         columnValues[key] = value
         persistColumnValue(entryID: entryID, columnID: columnID, value: value)
+        applyCategoryRules(toEntryID: entryID)
         refreshVisibleEntries()
     }
 
@@ -699,6 +751,18 @@ final class EntryListModel: ObservableObject {
             errorMessage = nil
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    private func applyCategoryRules(toEntryID entryID: Entry.ID) {
+        guard let store else { return }
+        do {
+            try store.applyCategoryRules(toEntryID: entryID)
+            columnValues = try store.loadColumnValues()
+            try reloadCategoryNames()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not apply Category rules: \(error)"
         }
     }
 

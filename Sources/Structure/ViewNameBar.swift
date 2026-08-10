@@ -88,8 +88,8 @@ struct ViewControlsBar: View {
                     showCriteria()
                 } label: {
                     Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 24, height: 24)
+                        .font(.system(size: 19.5, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(canFilter ? .primary : .secondary)
@@ -101,8 +101,8 @@ struct ViewControlsBar: View {
                     clearCriteria()
                 } label: {
                     Image(systemName: "xmark.circle")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 24, height: 24)
+                        .font(.system(size: 19.5, weight: .semibold))
+                        .frame(width: 36, height: 36)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(canClearFilter ? .primary : .secondary)

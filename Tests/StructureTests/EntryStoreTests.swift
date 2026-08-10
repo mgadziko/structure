@@ -696,6 +696,140 @@ final class EntryStoreTests: XCTestCase {
         ])
     }
 
+    func testCategoryRuleAppliesToMatchingEntries() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let matchingEntry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let otherEntry = Entry(
+            id: "entry-2",
+            body: "Review budget",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let projectColumn = EntryColumn(
+            id: "project-column",
+            title: "Project",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+        let peopleColumn = EntryColumn(
+            id: "people-column",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insert(matchingEntry)
+        try store.insert(otherEntry)
+        try store.insertColumn(projectColumn, createdAt: timestamp)
+        try store.insertColumn(peopleColumn, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: matchingEntry.id,
+            columnID: projectColumn.id,
+            value: EntryColumnValue(text: "Proposal", richTextData: nil),
+            updatedAt: timestamp
+        )
+        try store.upsertColumnValue(
+            entryID: otherEntry.id,
+            columnID: projectColumn.id,
+            value: EntryColumnValue(text: "Budget", richTextData: nil),
+            updatedAt: timestamp
+        )
+
+        let rule = try store.upsertCategoryRule(
+            targetColumnDefinitionID: peopleColumn.definitionID,
+            categoryName: "Sarah",
+            criteria: [
+                CategoryRuleCriterion(sourceColumnDefinitionID: projectColumn.definitionID, value: "Proposal")
+            ],
+            updatedAt: timestamp
+        )
+        try store.applyCategoryRulesToAllEntries(updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadCategoryRules(), [rule])
+        XCTAssertEqual(
+            try store.loadColumnValues()[EntryColumnValueKey(entryID: matchingEntry.id, columnID: peopleColumn.id)],
+            EntryColumnValue(text: "Sarah", richTextData: nil)
+        )
+        XCTAssertNil(try store.loadColumnValues()[EntryColumnValueKey(entryID: otherEntry.id, columnID: peopleColumn.id)])
+        XCTAssertEqual(try store.loadCategoryAssignments(columnID: peopleColumn.id), [matchingEntry.id: "Sarah"])
+    }
+
+    func testCategoryRuleDoesNotOverwriteExistingCategoryValue() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let projectColumn = EntryColumn(
+            id: "project-column",
+            title: "Project",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+        let peopleColumn = EntryColumn(
+            id: "people-column",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(projectColumn, createdAt: timestamp)
+        try store.insertColumn(peopleColumn, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: projectColumn.id,
+            value: EntryColumnValue(text: "Proposal", richTextData: nil),
+            updatedAt: timestamp
+        )
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: peopleColumn.id,
+            value: EntryColumnValue(text: "Bob", richTextData: nil),
+            updatedAt: timestamp
+        )
+        _ = try store.upsertCategoryRule(
+            targetColumnDefinitionID: peopleColumn.definitionID,
+            categoryName: "Sarah",
+            criteria: [
+                CategoryRuleCriterion(sourceColumnDefinitionID: projectColumn.definitionID, value: "Proposal")
+            ],
+            updatedAt: timestamp
+        )
+
+        try store.applyCategoryRulesToAllEntries(updatedAt: timestamp)
+
+        XCTAssertEqual(
+            try store.loadColumnValues()[EntryColumnValueKey(entryID: entry.id, columnID: peopleColumn.id)],
+            EntryColumnValue(text: "Bob", richTextData: nil)
+        )
+        XCTAssertEqual(try store.loadCategoryAssignments(columnID: peopleColumn.id), [entry.id: "Bob"])
+    }
+
     func testLegacyColumnValuesMigrateRichTextColumn() throws {
         let databaseURL = try temporaryDatabaseURL()
         try createLegacyColumnValueDatabase(at: databaseURL)
