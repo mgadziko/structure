@@ -1,6 +1,6 @@
 # Structure
 
-Structure is an Agenda-inspired personal information manager built around a write-it-now, structure-it-later workflow.
+Structure is a Lotus Agenda-inspired personal information manager built around a write-it-now, structure-it-later workflow.
 
 The core product idea is simple: capture free-form text immediately, then let categories, dates, people, projects, rules, and views emerge afterward without forcing a schema up front.
 
