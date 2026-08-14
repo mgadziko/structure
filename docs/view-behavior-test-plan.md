@@ -57,14 +57,42 @@ Expected result: other Views are listed alphabetically, and the current View is 
 
 4. Choose `New ...`.
 
-Expected result: Structure creates and opens a new View.
+Expected result: Structure asks for a View name, then creates and opens the named View.
+
+5. Choose `File > New View`.
+
+Expected result: Structure asks for a View name, then creates and opens the named View.
 
 ## View Rename
 
-1. Click the pencil button beside the View pulldown.
+1. Choose `View > Rename Current View`.
 2. Rename the current View.
 
 Expected result: the View name changes and persists after quit/relaunch.
+
+## Window Tabs
+
+1. Choose `View > Show All Tabs`.
+2. Press `Command-T` to create another tab.
+
+Expected result: Structure creates a new tab.
+
+3. Press `Command-Tab`.
+
+Expected result: if macOS passes the shortcut through, Structure advances to the next tab.
+
+4. Create three tabs.
+5. In each tab, use the View pulldown to select a different View.
+
+Expected result: each tab keeps its own selected View. Changing one tab's View does not change the View displayed in the other tabs.
+
+6. Confirm the tab labels.
+
+Expected result: each tab shows its View name, not the Library name.
+
+7. Quit and relaunch Structure.
+
+Expected result: Structure restores the same open View tabs from the previous session.
 
 ## Category Column Autocomplete
 

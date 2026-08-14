@@ -13,7 +13,7 @@ struct EntryStreamView: View {
                 views: model.views,
                 hasOpenLibrary: model.hasOpenLibrary,
                 openView: model.openView,
-                createView: model.createView
+                createView: { newViewPanel(for: model) }
             )
             FormattingBar()
             ScrollViewReader { proxy in

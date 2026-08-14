@@ -22,8 +22,10 @@ final class EntryListModel: ObservableObject {
     private var store: EntryStore?
     private var editingEntryIDs: Set<Entry.ID> = []
     private var editingColumnKeys: Set<EntryColumnValueKey> = []
+    private var preferredInitialViewID: StructureView.ID?
 
-    init() {
+    init(initialViewID: StructureView.ID? = nil) {
+        preferredInitialViewID = initialViewID
         recentLibraryURLs = Self.loadRecentLibraryURLs()
         do {
             let databaseURL = try Self.initialLibraryURL()
@@ -62,7 +64,7 @@ final class EntryListModel: ObservableObject {
 
     var windowTitle: String {
         guard hasOpenLibrary else { return "Structure" }
-        return "Structure - \(activeLibraryName)"
+        return activeViewTitle.isEmpty ? activeLibraryName : activeViewTitle
     }
 
     var showCreatedColumn: Bool {
@@ -113,6 +115,10 @@ final class EntryListModel: ObservableObject {
     var availableColumnNames: [String] {
         let used = Set(columns.map { normalizedName($0.title) })
         return allColumnNames.filter { !used.contains(normalizedName($0)) }
+    }
+
+    var suggestedNewViewTitle: String {
+        nextViewName()
     }
 
     func createEntry() {
@@ -184,16 +190,23 @@ final class EntryListModel: ObservableObject {
         errorMessage = nil
     }
 
-    func createView() {
+    func createView(title: String? = nil) {
         guard let store else {
             errorMessage = "Open or create a Library before adding Views."
+            return
+        }
+
+        let trimmedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let viewTitle = trimmedTitle.isEmpty ? nextViewName() : trimmedTitle
+        guard isUniqueViewName(viewTitle) else {
+            errorMessage = "A View named \(viewTitle) already exists."
             return
         }
 
         let now = Date()
         let view = StructureView(
             id: UUID().uuidString,
-            title: nextViewName(),
+            title: viewTitle,
             sort: EntrySort(column: .body, direction: .ascending),
             showsCreatedColumn: false,
             createdAt: now,
@@ -708,8 +721,11 @@ final class EntryListModel: ObservableObject {
             activeView = try store.loadDefaultView()
             views = try store.loadViews()
         } else {
+            let preferredViewID = preferredInitialViewID
+            preferredInitialViewID = nil
             let rememberedViewID = activeLibraryURL.flatMap { Self.rememberedActiveViewID(for: $0) }
-            activeView = views.first(where: { $0.id == rememberedViewID })
+            activeView = views.first(where: { $0.id == preferredViewID })
+                ?? views.first(where: { $0.id == rememberedViewID })
                 ?? views.first(where: { $0.id == activeView?.id })
                 ?? views.first(where: { $0.id == StructureView.defaultID })
                 ?? views.first

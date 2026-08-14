@@ -9,11 +9,85 @@ final class StructureAppDelegate: NSObject, NSApplicationDelegate {
         }
         return true
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        StructureTabSession.shared.beginTerminating()
+    }
 }
 
 func openStructureWindow() {
     NSApp.activate(ignoringOtherApps: true)
     NSApp.sendAction(#selector(NSWindow.newWindowForTab(_:)), to: nil, from: nil)
+}
+
+@MainActor
+func selectNextStructureTab() {
+    NSApp.sendAction(#selector(NSWindow.selectNextTab(_:)), to: nil, from: nil)
+}
+
+@MainActor
+final class StructureTabSession {
+    static let shared = StructureTabSession()
+
+    private let openViewTabIDsPreferenceKey = "StructureOpenViewTabIDs"
+    private var pendingInitialViewIDs: [StructureView.ID]
+    private var activeTabOrder: [UUID] = []
+    private var activeViewIDsByTab: [UUID: StructureView.ID] = [:]
+    private var didRequestRestoredTabs = false
+    private var isTerminating = false
+
+    private init() {
+        pendingInitialViewIDs = UserDefaults.standard.stringArray(forKey: openViewTabIDsPreferenceKey) ?? []
+    }
+
+    func beginTerminating() {
+        isTerminating = true
+    }
+
+    func claimInitialViewID() -> StructureView.ID? {
+        guard !pendingInitialViewIDs.isEmpty else { return nil }
+        return pendingInitialViewIDs.removeFirst()
+    }
+
+    func restoreTabsIfNeeded(from window: NSWindow?) {
+        guard window != nil, !didRequestRestoredTabs else { return }
+        didRequestRestoredTabs = true
+
+        let tabCountToRestore = pendingInitialViewIDs.count
+        guard tabCountToRestore > 0 else { return }
+
+        for index in 0..<tabCountToRestore {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (Double(index) * 0.05)) {
+                NSApp.sendAction(#selector(NSWindow.newWindowForTab(_:)), to: nil, from: nil)
+            }
+        }
+    }
+
+    func update(tabID: UUID, viewID: StructureView.ID?) {
+        guard let viewID else { return }
+        if !activeTabOrder.contains(tabID) {
+            activeTabOrder.append(tabID)
+        }
+        activeViewIDsByTab[tabID] = viewID
+        persist()
+    }
+
+    func unregister(tabID: UUID) {
+        activeTabOrder.removeAll { $0 == tabID }
+        activeViewIDsByTab.removeValue(forKey: tabID)
+        persist()
+    }
+
+    private func persist() {
+        guard !isTerminating else { return }
+
+        let viewIDs = activeTabOrder.compactMap { activeViewIDsByTab[$0] }
+        if viewIDs.isEmpty {
+            UserDefaults.standard.removeObject(forKey: openViewTabIDsPreferenceKey)
+        } else {
+            UserDefaults.standard.set(viewIDs, forKey: openViewTabIDsPreferenceKey)
+        }
+    }
 }
 
 @MainActor
@@ -67,6 +141,25 @@ func openViewSelectionPanel(for model: EntryListModel) {
 
     if alert.runModal() == .alertFirstButtonReturn, let viewID = selector.selectedViewID {
         model.openView(id: viewID)
+    }
+}
+
+@MainActor
+func newViewPanel(for model: EntryListModel) {
+    let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+    input.stringValue = model.suggestedNewViewTitle
+    input.selectText(nil)
+
+    let alert = NSAlert()
+    alert.messageText = "New View"
+    alert.informativeText = "Name this View."
+    alert.accessoryView = input
+    alert.addButton(withTitle: "Create")
+    alert.addButton(withTitle: "Cancel")
+    alert.window.initialFirstResponder = input
+
+    if alert.runModal() == .alertFirstButtonReturn {
+        model.createView(title: input.stringValue)
     }
 }
 
@@ -535,14 +628,12 @@ private final class CategoryRuleController: NSObject {
 @main
 struct StructureApp: App {
     @NSApplicationDelegateAdaptor(StructureAppDelegate.self) private var appDelegate
-    @StateObject private var model = EntryListModel()
+    @FocusedObject private var model: EntryListModel?
     @State private var viewZoomScale: CGFloat = 1.0
 
     var body: some Scene {
         WindowGroup("Structure") {
-            EntryStreamView(model: model, viewScale: viewZoomScale)
-                .frame(minWidth: 620, minHeight: 520)
-                .background(WindowTitleSetter(title: model.windowTitle))
+            StructureWindowRoot(viewScale: viewZoomScale)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -553,10 +644,12 @@ struct StructureApp: App {
 
             CommandGroup(after: .pasteboard) {
                 Button("Find") {
-                    findPanel(for: model)
+                    if let model {
+                        findPanel(for: model)
+                    }
                 }
                 .keyboardShortcut("f", modifiers: [.command])
-                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+                .disabled(model?.hasOpenLibrary != true || model?.hasOpenView != true)
             }
 
             CommandGroup(before: .toolbar) {
@@ -564,6 +657,19 @@ struct StructureApp: App {
                     toggleFullScreenForKeyWindow()
                 }
                 .keyboardShortcut("f", modifiers: [.control, .command])
+                .disabled(NSApp.keyWindow == nil)
+            }
+
+            CommandGroup(after: .windowArrangement) {
+                Button("New Tab") {
+                    openStructureWindow()
+                }
+                .keyboardShortcut("t", modifiers: [.command])
+
+                Button("Next Tab") {
+                    selectNextStructureTab()
+                }
+                .keyboardShortcut(.tab, modifiers: [.command])
                 .disabled(NSApp.keyWindow == nil)
             }
 
@@ -583,107 +689,156 @@ struct StructureApp: App {
                 Divider()
 
                 Button("Rename Current View") {
-                    renameActiveViewPanel(for: model)
+                    if let model {
+                        renameActiveViewPanel(for: model)
+                    }
                 }
-                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+                .disabled(model?.hasOpenLibrary != true || model?.hasOpenView != true)
 
                 Button("Delete Current View") {
-                    confirmDeleteActiveView(for: model)
+                    if let model {
+                        confirmDeleteActiveView(for: model)
+                    }
                 }
-                .disabled(!model.hasOpenLibrary || !model.canDeleteActiveView)
+                .disabled(model?.hasOpenLibrary != true || model?.canDeleteActiveView != true)
             }
 
             CommandMenu("Criteria") {
                 Button("Show Active Criteria") {
-                    showActiveCriteriaPanel(for: model)
+                    if let model {
+                        showActiveCriteriaPanel(for: model)
+                    }
                 }
-                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+                .disabled(model?.hasOpenLibrary != true || model?.hasOpenView != true)
 
                 Divider()
 
                 Button("Add/Modify Criteria") {
-                    viewCriteriaPanel(for: model)
+                    if let model {
+                        viewCriteriaPanel(for: model)
+                    }
                 }
-                .disabled(!model.hasOpenLibrary || !model.canFilterActiveView || model.columns.isEmpty)
+                .disabled(model?.hasOpenLibrary != true || model?.canFilterActiveView != true || model?.columns.isEmpty != false)
 
                 Button("Remove Criteria") {
-                    removeCriteriaPanel(for: model)
+                    if let model {
+                        removeCriteriaPanel(for: model)
+                    }
                 }
-                .disabled(!model.hasOpenLibrary || !model.canClearActiveViewFilter)
+                .disabled(model?.hasOpenLibrary != true || model?.canClearActiveViewFilter != true)
 
                 Divider()
 
                 Button("Save Criteria as Category Rule...") {
-                    saveCriteriaAsCategoryRulePanel(for: model)
+                    if let model {
+                        saveCriteriaAsCategoryRulePanel(for: model)
+                    }
                 }
-                .disabled(!model.hasOpenLibrary || !model.canSaveActiveCriteriaAsCategoryRule)
+                .disabled(model?.hasOpenLibrary != true || model?.canSaveActiveCriteriaAsCategoryRule != true)
             }
 
             CommandGroup(replacing: .newItem) {
                 Button("New Library") {
-                    newLibraryPanel(for: model)
-                }
-
-                Button("Open Library") {
-                    openLibraryPanel(for: model)
-                }
-                .keyboardShortcut("o", modifiers: [.command])
-
-                Menu("Open Recent Library") {
-                    ForEach(model.recentLibraryURLs, id: \.path) { url in
-                        Button(libraryMenuTitle(for: url)) {
-                            model.openLibrary(at: url)
-                        }
-                        .disabled(model.activeLibraryURL?.path == url.path)
+                    if let model {
+                        newLibraryPanel(for: model)
                     }
                 }
-                .disabled(model.recentLibraryURLs.isEmpty)
+                .disabled(model == nil)
+
+                Button("Open Library") {
+                    if let model {
+                        openLibraryPanel(for: model)
+                    }
+                }
+                .keyboardShortcut("o", modifiers: [.command])
+                .disabled(model == nil)
+
+                Menu("Open Recent Library") {
+                    ForEach(model?.recentLibraryURLs ?? [], id: \.path) { url in
+                        Button(libraryMenuTitle(for: url)) {
+                            model?.openLibrary(at: url)
+                        }
+                        .disabled(model?.activeLibraryURL?.path == url.path)
+                    }
+                }
+                .disabled(model?.recentLibraryURLs.isEmpty != false)
 
                 Button("Close Library") {
-                    model.closeLibrary()
+                    model?.closeLibrary()
                 }
-                .disabled(!model.hasOpenLibrary)
+                .disabled(model?.hasOpenLibrary != true)
 
                 Divider()
 
                 Button("New View") {
-                    model.createView()
+                    if let model {
+                        newViewPanel(for: model)
+                    }
                 }
                 .keyboardShortcut("n", modifiers: [.command])
-                .disabled(!model.hasOpenLibrary)
+                .disabled(model?.hasOpenLibrary != true)
 
-                if model.views.count <= 7 {
+                if (model?.views.count ?? 0) <= 7 {
                     Menu("Open View") {
-                        ForEach(model.views) { view in
+                        ForEach(model?.views ?? []) { view in
                             Button(view.title) {
-                                model.openView(id: view.id)
+                                model?.openView(id: view.id)
                             }
-                            .disabled(model.activeView?.id == view.id)
+                            .disabled(model?.activeView?.id == view.id)
                         }
                     }
-                    .disabled(!model.hasOpenLibrary || model.views.isEmpty)
+                    .disabled(model?.hasOpenLibrary != true || model?.views.isEmpty != false)
                 } else {
                     Button("Open View...") {
-                        openViewSelectionPanel(for: model)
+                        if let model {
+                            openViewSelectionPanel(for: model)
+                        }
                     }
-                    .disabled(!model.hasOpenLibrary || model.views.isEmpty)
+                    .disabled(model?.hasOpenLibrary != true || model?.views.isEmpty != false)
                 }
 
                 Button("Close View") {
-                    model.closeView()
+                    model?.closeView()
                 }
                 .keyboardShortcut("w", modifiers: [.command])
-                .disabled(!model.hasOpenView)
+                .disabled(model?.hasOpenView != true)
 
                 Divider()
 
                 Button("New Entry") {
-                    model.createEntry()
+                    model?.createEntry()
                 }
                 .keyboardShortcut("e", modifiers: [.command])
-                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+                .disabled(model?.hasOpenLibrary != true || model?.hasOpenView != true)
             }
         }
+    }
+}
+
+private struct StructureWindowRoot: View {
+    @StateObject private var model: EntryListModel
+    @State private var tabID = UUID()
+    let viewScale: CGFloat
+
+    init(viewScale: CGFloat) {
+        self.viewScale = viewScale
+        _model = StateObject(wrappedValue: EntryListModel(initialViewID: StructureTabSession.shared.claimInitialViewID()))
+    }
+
+    var body: some View {
+        EntryStreamView(model: model, viewScale: viewScale)
+            .frame(minWidth: 620, minHeight: 520)
+            .background(WindowTitleSetter(title: model.windowTitle))
+            .focusedSceneObject(model)
+            .onAppear {
+                StructureTabSession.shared.update(tabID: tabID, viewID: model.activeView?.id)
+            }
+            .onChange(of: model.activeView?.id) { viewID in
+                StructureTabSession.shared.update(tabID: tabID, viewID: viewID)
+            }
+            .onDisappear {
+                StructureTabSession.shared.unregister(tabID: tabID)
+            }
     }
 }
 
@@ -837,6 +992,9 @@ private struct WindowTitleSetter: NSViewRepresentable {
         func configure(_ window: NSWindow?, title: String) {
             guard let window else { return }
             window.title = title
+            Task { @MainActor in
+                StructureTabSession.shared.restoreTabsIfNeeded(from: window)
+            }
             if observedWindow !== window {
                 observe(window)
             }
