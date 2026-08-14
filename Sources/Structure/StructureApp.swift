@@ -115,19 +115,16 @@ func viewCriteriaPanel(for model: EntryListModel) {
     )
 
     let alert = NSAlert()
-    alert.messageText = "View Criteria"
+    alert.messageText = "Add/Modify Criteria"
     alert.informativeText = "Show Entries where a column matches this value."
     alert.accessoryView = selector.view
     alert.addButton(withTitle: "Apply")
-    alert.addButton(withTitle: "Clear")
     alert.addButton(withTitle: "Cancel")
     alert.window.initialFirstResponder = selector.valueField
 
     switch alert.runModal() {
     case .alertFirstButtonReturn:
         model.updateActiveViewCriteria(selector.criteria)
-    case .alertSecondButtonReturn:
-        model.updateActiveViewCriteria([])
     default:
         break
     }
@@ -160,18 +157,35 @@ func saveCriteriaAsCategoryRulePanel(for model: EntryListModel) {
 }
 
 @MainActor
-func confirmClearActiveViewCriteria(for model: EntryListModel) {
-    guard model.canClearActiveViewFilter else { return }
+func removeCriteriaPanel(for model: EntryListModel) {
+    guard let activeView = model.activeView, !activeView.criteria.isEmpty else { return }
 
+    let selector = CriteriaRemovalController(
+        criteria: activeView.criteria,
+        columns: model.columns
+    )
     let alert = NSAlert()
-    alert.messageText = "Clear Criteria Are you sure?"
+    alert.messageText = "Remove Criteria"
+    alert.informativeText = "Select the active Criteria to remove from this View."
+    alert.accessoryView = selector.view
+    alert.addButton(withTitle: "Remove Selected")
     alert.addButton(withTitle: "Cancel")
-    alert.addButton(withTitle: "OK")
-    alert.alertStyle = .warning
 
-    if alert.runModal() == .alertSecondButtonReturn {
-        model.updateActiveViewCriteria([])
+    if alert.runModal() == .alertFirstButtonReturn {
+        model.removeActiveViewCriteria(ids: selector.selectedCriterionIDs)
     }
+}
+
+@MainActor
+func showActiveCriteriaPanel(for model: EntryListModel) {
+    let summaries = model.activeViewCriteriaSummaries
+    let alert = NSAlert()
+    alert.messageText = "Active Criteria"
+    alert.informativeText = summaries.isEmpty
+        ? "This View has no active Criteria."
+        : summaries.joined(separator: "\n")
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
 }
 
 @MainActor
@@ -399,6 +413,85 @@ private final class CriterionRowController: NSObject {
     }
 }
 
+private final class CriteriaRemovalController: NSObject {
+    let view: NSView
+    private var rows: [CriteriaRemovalRow] = []
+
+    var selectedCriterionIDs: Set<ViewCriterion.ID> {
+        Set(rows.filter(\.isSelected).map(\.criterionID))
+    }
+
+    init(criteria: [ViewCriterion], columns: [EntryColumn]) {
+        let columnTitlesByID = Dictionary(uniqueKeysWithValues: columns.map { ($0.id, $0.title) })
+        let width: CGFloat = 420
+        let listHeight: CGFloat = 170
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 210))
+
+        let selectAllButton = NSButton(
+            title: "Select All",
+            target: nil,
+            action: nil
+        )
+        selectAllButton.bezelStyle = .rounded
+        selectAllButton.frame = NSRect(x: 0, y: 178, width: 96, height: 28)
+
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: width, height: listHeight))
+        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .bezelBorder
+
+        let rowHeight: CGFloat = 30
+        let documentHeight = max(listHeight, CGFloat(criteria.count) * rowHeight)
+        let documentView = NSView(frame: NSRect(x: 0, y: 0, width: width - 18, height: documentHeight))
+
+        for (index, criterion) in criteria.enumerated() {
+            let title = columnTitlesByID[criterion.columnID] ?? "Unknown Column"
+            let row = CriteriaRemovalRow(
+                criterionID: criterion.id,
+                title: "\(title) = \(criterion.value)"
+            )
+            row.checkbox.frame = NSRect(
+                x: 8,
+                y: documentHeight - CGFloat(index + 1) * rowHeight,
+                width: width - 34,
+                height: 24
+            )
+            rows.append(row)
+            documentView.addSubview(row.checkbox)
+        }
+
+        scrollView.documentView = documentView
+        container.addSubview(selectAllButton)
+        container.addSubview(scrollView)
+
+        self.view = container
+        super.init()
+
+        selectAllButton.target = self
+        selectAllButton.action = #selector(selectAll)
+    }
+
+    @objc private func selectAll() {
+        for row in rows {
+            row.checkbox.state = .on
+        }
+    }
+}
+
+private final class CriteriaRemovalRow {
+    let criterionID: ViewCriterion.ID
+    let checkbox: NSButton
+
+    var isSelected: Bool {
+        checkbox.state == .on
+    }
+
+    init(criterionID: ViewCriterion.ID, title: String) {
+        self.criterionID = criterionID
+        self.checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+        self.checkbox.lineBreakMode = .byTruncatingTail
+    }
+}
+
 private final class CategoryRuleController: NSObject {
     let view: NSView
     let categoryField: NSTextField
@@ -489,21 +582,6 @@ struct StructureApp: App {
 
                 Divider()
 
-                Button("View Criteria...") {
-                    viewCriteriaPanel(for: model)
-                }
-                .disabled(!model.hasOpenLibrary || !model.canFilterActiveView || model.columns.isEmpty)
-
-                Button("Clear Criteria") {
-                    confirmClearActiveViewCriteria(for: model)
-                }
-                .disabled(!model.hasOpenLibrary || !model.canClearActiveViewFilter)
-
-                Button("Save Criteria as Category Rule...") {
-                    saveCriteriaAsCategoryRulePanel(for: model)
-                }
-                .disabled(!model.hasOpenLibrary || !model.canSaveActiveCriteriaAsCategoryRule)
-
                 Button("Rename Current View") {
                     renameActiveViewPanel(for: model)
                 }
@@ -513,6 +591,32 @@ struct StructureApp: App {
                     confirmDeleteActiveView(for: model)
                 }
                 .disabled(!model.hasOpenLibrary || !model.canDeleteActiveView)
+            }
+
+            CommandMenu("Criteria") {
+                Button("Show Active Criteria") {
+                    showActiveCriteriaPanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.hasOpenView)
+
+                Divider()
+
+                Button("Add/Modify Criteria") {
+                    viewCriteriaPanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canFilterActiveView || model.columns.isEmpty)
+
+                Button("Remove Criteria") {
+                    removeCriteriaPanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canClearActiveViewFilter)
+
+                Divider()
+
+                Button("Save Criteria as Category Rule...") {
+                    saveCriteriaAsCategoryRulePanel(for: model)
+                }
+                .disabled(!model.hasOpenLibrary || !model.canSaveActiveCriteriaAsCategoryRule)
             }
 
             CommandGroup(replacing: .newItem) {
@@ -709,14 +813,84 @@ private struct WindowTitleSetter: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            view.window?.title = title
+            context.coordinator.configure(view.window, title: title)
         }
         return view
     }
 
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
-            view.window?.title = title
+            context.coordinator.configure(view.window, title: title)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    final class Coordinator {
+        private let framePreferenceKey = "StructureMainWindowFrame"
+        private weak var observedWindow: NSWindow?
+        private var restoredWindowIDs: Set<ObjectIdentifier> = []
+        private var observers: [NSObjectProtocol] = []
+
+        func configure(_ window: NSWindow?, title: String) {
+            guard let window else { return }
+            window.title = title
+            if observedWindow !== window {
+                observe(window)
+            }
+            restoreFrameIfNeeded(for: window)
+        }
+
+        private func observe(_ window: NSWindow) {
+            removeObservers()
+            observedWindow = window
+            let center = NotificationCenter.default
+            observers = [
+                center.addObserver(forName: NSWindow.didMoveNotification, object: window, queue: .main) { [weak self] notification in
+                    self?.saveFrame(from: notification.object as? NSWindow)
+                },
+                center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] notification in
+                    self?.saveFrame(from: notification.object as? NSWindow)
+                },
+                center.addObserver(forName: NSWindow.didEndLiveResizeNotification, object: window, queue: .main) { [weak self] notification in
+                    self?.saveFrame(from: notification.object as? NSWindow)
+                },
+                center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] notification in
+                    self?.saveFrame(from: notification.object as? NSWindow)
+                }
+            ]
+        }
+
+        private func restoreFrameIfNeeded(for window: NSWindow) {
+            let id = ObjectIdentifier(window)
+            guard !restoredWindowIDs.contains(id) else { return }
+            restoredWindowIDs.insert(id)
+
+            guard let storedFrame = UserDefaults.standard.string(forKey: framePreferenceKey) else { return }
+            let frame = NSRectFromString(storedFrame)
+            guard frame.width > 0, frame.height > 0 else { return }
+
+            let visibleFrames = NSScreen.screens.map(\.visibleFrame)
+            guard visibleFrames.contains(where: { $0.intersects(frame) }) else { return }
+            window.setFrame(frame, display: true)
+        }
+
+        private func saveFrame(from window: NSWindow?) {
+            guard let window else { return }
+            UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: framePreferenceKey)
+        }
+
+        private func removeObservers() {
+            for observer in observers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            observers = []
+        }
+
+        deinit {
+            removeObservers()
         }
     }
 }

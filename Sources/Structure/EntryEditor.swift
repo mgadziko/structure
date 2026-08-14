@@ -11,15 +11,18 @@ struct EntryEditor: View {
     let columnsAfterEntry: [EntryColumn]
     let viewScale: CGFloat
     let columnValue: (Entry.ID, EntryColumn.ID) -> EntryColumnValue
+    let columnAssignmentInfo: (Entry.ID, EntryColumn.ID) -> AssignmentInfo?
     let columnAutocompleteSource: (Entry.ID, EntryColumn.ID) -> String
     let saveColumnValueDraft: (Entry.ID, EntryColumn.ID, EntryColumnValue) -> Void
     let updateColumnValue: (Entry.ID, EntryColumn.ID, EntryColumnValue) -> Void
+    let markColumnValueExplicit: (Entry.ID, EntryColumn.ID) -> Void
     let beginEntryEditing: (Entry.ID) -> Void
     let endEntryEditing: (Entry.ID) -> Void
     let beginColumnEditing: (Entry.ID, EntryColumn.ID) -> Void
     let endColumnEditing: (Entry.ID, EntryColumn.ID) -> Void
     var focusedEntryID: FocusState<Entry.ID?>.Binding
     @State private var editorHeight: CGFloat = 22
+    @State private var inspectedAssignment: AssignmentInspection?
 
     var body: some View {
         HStack(alignment: .top, spacing: scaled(18)) {
@@ -41,6 +44,7 @@ struct EntryEditor: View {
             ForEach(columnsBeforeEntry) { column in
                 UndefinedColumnCell(
                     value: columnValue(entry.id, column.id),
+                    assignmentInfo: columnAssignmentInfo(entry.id, column.id),
                     entryText: text,
                     columnAutocompleteText: columnAutocompleteSource(entry.id, column.id),
                     viewScale: viewScale,
@@ -61,6 +65,15 @@ struct EntryEditor: View {
                     },
                     endEditing: {
                         endColumnEditing(entry.id, column.id)
+                    },
+                    inspectAssignment: { info in
+                        inspectedAssignment = AssignmentInspection(
+                            entryID: entry.id,
+                            columnID: column.id,
+                            columnTitle: column.title,
+                            value: columnValue(entry.id, column.id).text,
+                            info: info
+                        )
                     }
                 )
             }
@@ -102,6 +115,7 @@ struct EntryEditor: View {
             ForEach(columnsAfterEntry) { column in
                 UndefinedColumnCell(
                     value: columnValue(entry.id, column.id),
+                    assignmentInfo: columnAssignmentInfo(entry.id, column.id),
                     entryText: text,
                     columnAutocompleteText: columnAutocompleteSource(entry.id, column.id),
                     viewScale: viewScale,
@@ -122,6 +136,15 @@ struct EntryEditor: View {
                     },
                     endEditing: {
                         endColumnEditing(entry.id, column.id)
+                    },
+                    inspectAssignment: { info in
+                        inspectedAssignment = AssignmentInspection(
+                            entryID: entry.id,
+                            columnID: column.id,
+                            columnTitle: column.title,
+                            value: columnValue(entry.id, column.id).text,
+                            info: info
+                        )
                     }
                 )
             }
@@ -148,6 +171,18 @@ struct EntryEditor: View {
                 columnsAfterEntry: columnsAfterEntry
             )
         }
+        .sheet(item: $inspectedAssignment) { inspection in
+            AssignmentInspector(
+                inspection: inspection,
+                makeExplicit: {
+                    markColumnValueExplicit(inspection.entryID, inspection.columnID)
+                    inspectedAssignment = nil
+                },
+                close: {
+                    inspectedAssignment = nil
+                }
+            )
+        }
     }
 
     private func scaled(_ value: CGFloat) -> CGFloat {
@@ -168,6 +203,7 @@ enum EntryRowLayout {
 
 private struct UndefinedColumnCell: View {
     let value: EntryColumnValue
+    let assignmentInfo: AssignmentInfo?
     let entryText: String
     let columnAutocompleteText: String
     let viewScale: CGFloat
@@ -181,6 +217,7 @@ private struct UndefinedColumnCell: View {
     let commit: (EntryColumnValue) -> Void
     let beginEditing: () -> Void
     let endEditing: () -> Void
+    let inspectAssignment: (AssignmentInfo) -> Void
     @State private var draft = ""
     @State private var draftRichTextData: Data?
     @State private var cellHeight: CGFloat = 24
@@ -214,6 +251,23 @@ private struct UndefinedColumnCell: View {
                     .padding(.top, 3)
                     .allowsHitTesting(false)
             }
+
+            if let assignmentInfo, assignmentInfo.isRuleCreated, !draft.isEmpty {
+                Button {
+                    inspectAssignment(assignmentInfo)
+                } label: {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 10 * viewScale, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(3)
+                }
+                .buttonStyle(.plain)
+                .background(Color(nsColor: .textBackgroundColor).opacity(0.86))
+                .clipShape(Circle())
+                .help("Rule-filled assignment")
+                .accessibilityLabel("Rule-filled assignment")
+                .offset(x: CGFloat(width) - 22, y: 2)
+            }
         }
             .frame(width: width, height: displayHeight, alignment: .topLeading)
             .scaleEffect(viewScale, anchor: .topLeading)
@@ -242,6 +296,72 @@ private struct UndefinedColumnCell: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+    }
+}
+
+private struct AssignmentInspection: Identifiable {
+    var id: String { "\(entryID):\(columnID)" }
+    let entryID: Entry.ID
+    let columnID: EntryColumn.ID
+    let columnTitle: String
+    let value: String
+    let info: AssignmentInfo
+}
+
+private struct AssignmentInspector: View {
+    let inspection: AssignmentInspection
+    let makeExplicit: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Assignment")
+                .font(.title2.weight(.semibold))
+
+            Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 8) {
+                GridRow {
+                    Text("Column")
+                        .foregroundStyle(.secondary)
+                    Text(inspection.columnTitle)
+                }
+                GridRow {
+                    Text("Value")
+                        .foregroundStyle(.secondary)
+                    Text(inspection.value.isEmpty ? "Empty" : inspection.value)
+                }
+                GridRow {
+                    Text("Source")
+                        .foregroundStyle(.secondary)
+                    Text(inspection.info.source.displayName)
+                }
+                if let detail = inspection.info.sourceDetail, !detail.isEmpty {
+                    GridRow {
+                        Text("Rule")
+                            .foregroundStyle(.secondary)
+                        Text(detail)
+                    }
+                }
+            }
+            .font(.system(size: 13))
+
+            Text("Rule-filled assignments are added only when the cell was empty. Making this explicit keeps the current value and treats it as user-entered.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                Spacer()
+                Button("Close") {
+                    close()
+                }
+                Button("Make Explicit") {
+                    makeExplicit()
+                }
+                .disabled(!inspection.info.isRuleCreated)
+            }
+        }
+        .padding(20)
+        .frame(width: 380, alignment: .leading)
     }
 }
 

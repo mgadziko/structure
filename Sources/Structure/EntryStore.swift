@@ -98,9 +98,7 @@ final class EntryStore {
         while sqlite3_step(statement) == SQLITE_ROW {
             var loadedView = view(from: statement)
             let criteria = try loadViewCriteria(viewID: loadedView.id)
-            if !criteria.isEmpty {
-                loadedView.criteria = criteria
-            }
+            loadedView.criteria = mergedViewCriteria(storedCriteria: criteria, legacyFilter: loadedView.filter)
             views.append(loadedView)
         }
 
@@ -125,9 +123,7 @@ final class EntryStore {
 
         var loadedView = view(from: statement)
         let criteria = try loadViewCriteria(viewID: loadedView.id)
-        if !criteria.isEmpty {
-            loadedView.criteria = criteria
-        }
+        loadedView.criteria = mergedViewCriteria(storedCriteria: criteria, legacyFilter: loadedView.filter)
         return loadedView
     }
 
@@ -744,6 +740,45 @@ final class EntryStore {
         return values
     }
 
+    func loadColumnValueAssignmentInfo() throws -> [EntryColumnValueKey: AssignmentInfo] {
+        let sql = """
+        SELECT a.entry_id, c.id, a.source,
+               CASE WHEN a.source = 'category_rule' THEN r.category_name ELSE NULL END
+        FROM assignments a
+        JOIN entry_columns c ON c.column_definition_id = a.target_id
+        JOIN entries e ON e.id = a.entry_id
+        LEFT JOIN category_rules r
+          ON r.target_column_definition_id = a.target_id
+         AND lower(r.category_name) = lower(a.value_text)
+         AND r.deleted_at IS NULL
+        WHERE a.target_kind = 'column_definition'
+          AND a.deleted_at IS NULL
+          AND c.deleted_at IS NULL
+          AND e.deleted_at IS NULL;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var infos: [EntryColumnValueKey: AssignmentInfo] = [:]
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let entryIDText = sqlite3_column_text(statement, 0),
+                let columnIDText = sqlite3_column_text(statement, 1),
+                let sourceText = sqlite3_column_text(statement, 2)
+            else { continue }
+
+            let source = AssignmentSource(storageValue: String(cString: sourceText))
+            let ruleCategoryName = sqlite3_column_text(statement, 3).map { String(cString: $0) }
+            infos[EntryColumnValueKey(
+                entryID: String(cString: entryIDText),
+                columnID: String(cString: columnIDText)
+            )] = AssignmentInfo(source: source, sourceDetail: ruleCategoryName)
+        }
+
+        return infos
+    }
+
     func upsertColumnValue(
         entryID: Entry.ID,
         columnID: EntryColumn.ID,
@@ -788,6 +823,12 @@ final class EntryStore {
         sqlite3_bind_double(statement, 7, updatedAt.timeIntervalSince1970)
 
         try step(statement)
+    }
+
+    func markColumnValueExplicit(entryID: Entry.ID, columnID: EntryColumn.ID, updatedAt: Date = Date()) throws {
+        let currentValues = try loadColumnValues()
+        guard let value = currentValues[EntryColumnValueKey(entryID: entryID, columnID: columnID)] else { return }
+        try upsertColumnValue(entryID: entryID, columnID: columnID, value: value, updatedAt: updatedAt)
     }
 
     func copyColumnValues(from sourceColumnID: EntryColumn.ID, to targetColumnID: EntryColumn.ID, updatedAt: Date = Date()) throws {
@@ -1797,6 +1838,24 @@ final class EntryStore {
             createdAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 8)),
             updatedAt: Date(timeIntervalSince1970: sqlite3_column_double(statement, 9))
         )
+    }
+
+    private func mergedViewCriteria(storedCriteria: [ViewCriterion], legacyFilter: ViewFilter?) -> [ViewCriterion] {
+        var criteria = storedCriteria
+        guard let legacyFilter else { return criteria }
+        let legacyCriterion = ViewCriterion(
+            id: "legacy-filter:\(legacyFilter.columnID)",
+            columnID: legacyFilter.columnID,
+            value: legacyFilter.value
+        )
+        let hasLegacyCriterion = criteria.contains { criterion in
+            criterion.columnID == legacyCriterion.columnID
+                && criterion.normalizedValue == legacyCriterion.normalizedValue
+        }
+        if !hasLegacyCriterion {
+            criteria.insert(legacyCriterion, at: 0)
+        }
+        return criteria
     }
 
     private func bindView(_ view: StructureView, to statement: OpaquePointer?) {

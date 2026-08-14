@@ -215,6 +215,58 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertNil(try store.loadView(id: view.id)?.filter)
     }
 
+    func testViewCriteriaAllowsMultipleValuesFromSameColumn() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "Filtered",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        let criteria = [
+            ViewCriterion(id: "criterion-1", columnID: "project-column", value: "Proposal"),
+            ViewCriterion(id: "criterion-2", columnID: "project-column", value: "Budget")
+        ]
+
+        try store.insertView(view)
+        try store.updateViewCriteria(viewID: view.id, criteria: criteria, updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadView(id: view.id)?.criteria, criteria)
+    }
+
+    func testViewCriteriaMergeLegacyFilterWithStoredCriteria() throws {
+        let databaseURL = try temporaryDatabaseURL()
+        let store = try EntryStore(databaseURL: databaseURL)
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "Filtered",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+        let storedCriteria = [
+            ViewCriterion(id: "criterion-people", columnID: "people-column", value: "Sarah")
+        ]
+
+        try store.insertView(view)
+        try store.updateViewCriteria(viewID: view.id, criteria: storedCriteria, updatedAt: timestamp)
+        try execute("""
+        UPDATE structure_views
+        SET filter_column_id = 'project-column', filter_value = 'Proposal'
+        WHERE id = 'view-1';
+        """, databaseURL: databaseURL)
+
+        let loadedView = try XCTUnwrap(try store.loadView(id: view.id))
+        XCTAssertEqual(loadedView.criteria.map(\.columnID), ["project-column", "people-column"])
+        XCTAssertEqual(loadedView.criteria.map(\.value), ["Proposal", "Sarah"])
+        XCTAssertEqual(try store.loadViews().first(where: { $0.id == view.id })?.criteria, loadedView.criteria)
+    }
+
     func testInsertViewPersistsMultipleCriteria() throws {
         let store = try EntryStore(databaseURL: temporaryDatabaseURL())
         let timestamp = Date(timeIntervalSince1970: 10)
@@ -769,6 +821,72 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadCategoryAssignments(columnID: peopleColumn.id), [matchingEntry.id: "Sarah"])
     }
 
+    func testCategoryRuleAssignmentInfoRoundTripsAndCanBecomeExplicit() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let projectColumn = EntryColumn(
+            id: "project-column",
+            title: "Project",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+        let peopleColumn = EntryColumn(
+            id: "people-column",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(projectColumn, createdAt: timestamp)
+        try store.insertColumn(peopleColumn, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: projectColumn.id,
+            value: EntryColumnValue(text: "Proposal", richTextData: nil),
+            updatedAt: timestamp
+        )
+        _ = try store.upsertCategoryRule(
+            targetColumnDefinitionID: peopleColumn.definitionID,
+            categoryName: "Sarah",
+            criteria: [
+                CategoryRuleCriterion(sourceColumnDefinitionID: projectColumn.definitionID, value: "Proposal")
+            ],
+            updatedAt: timestamp
+        )
+
+        try store.applyCategoryRulesToAllEntries(updatedAt: timestamp)
+
+        let key = EntryColumnValueKey(entryID: entry.id, columnID: peopleColumn.id)
+        XCTAssertEqual(
+            try store.loadColumnValueAssignmentInfo()[key],
+            AssignmentInfo(source: .categoryRule, sourceDetail: "Sarah")
+        )
+
+        try store.markColumnValueExplicit(entryID: entry.id, columnID: peopleColumn.id, updatedAt: timestamp)
+
+        XCTAssertEqual(
+            try store.loadColumnValues()[key],
+            EntryColumnValue(text: "Sarah", richTextData: nil)
+        )
+        XCTAssertEqual(
+            try store.loadColumnValueAssignmentInfo()[key],
+            AssignmentInfo(source: .explicit, sourceDetail: nil)
+        )
+    }
+
     func testCategoryRuleDoesNotOverwriteExistingCategoryValue() throws {
         let store = try EntryStore(databaseURL: temporaryDatabaseURL())
         let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
@@ -996,5 +1114,12 @@ final class EntryStoreTests: XCTestCase {
             let message = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown SQLite error"
             XCTFail(message)
         }
+    }
+
+    private func execute(_ sql: String, databaseURL: URL) throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(databaseURL.path, &db), SQLITE_OK)
+        defer { sqlite3_close(db) }
+        try execute(sql, db: db)
     }
 }

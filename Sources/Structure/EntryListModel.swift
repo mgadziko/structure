@@ -11,6 +11,7 @@ final class EntryListModel: ObservableObject {
     @Published private(set) var views: [StructureView] = []
     @Published var columns: [EntryColumn] = []
     @Published private var columnValues: [EntryColumnValueKey: EntryColumnValue] = [:]
+    @Published private var columnAssignmentInfos: [EntryColumnValueKey: AssignmentInfo] = [:]
     @Published private var categoryNamesByColumnID: [EntryColumn.ID: [String]] = [:]
     @Published private(set) var visibleEntries: [Entry] = []
     @Published private(set) var activeLibraryURL: URL?
@@ -69,13 +70,17 @@ final class EntryListModel: ObservableObject {
     }
 
     var activeViewFilterSummary: String? {
-        guard let criteria = activeView?.criteria, !criteria.isEmpty else { return nil }
-        let summaries = criteria.compactMap { criterion -> String? in
+        let summaries = activeViewCriteriaSummaries
+        guard !summaries.isEmpty else { return nil }
+        return summaries.joined(separator: " and ")
+    }
+
+    var activeViewCriteriaSummaries: [String] {
+        guard let criteria = activeView?.criteria, !criteria.isEmpty else { return [] }
+        return criteria.compactMap { criterion in
             guard let column = columns.first(where: { $0.id == criterion.columnID }) else { return nil }
             return "\(column.title) = \(criterion.value)"
         }
-        guard !summaries.isEmpty else { return nil }
-        return summaries.joined(separator: " and ")
     }
 
     var canFilterActiveView: Bool {
@@ -144,6 +149,7 @@ final class EntryListModel: ObservableObject {
             let store = try EntryStore(databaseURL: url)
             self.store = store
             activeLibraryURL = url
+            activeView = nil
             Self.rememberLastOpenedLibrary(at: url)
             recentLibraryURLs = Self.loadRecentLibraryURLs()
             try loadLibraryState(from: store, createEntryIfEmpty: true)
@@ -161,6 +167,7 @@ final class EntryListModel: ObservableObject {
             let store = try EntryStore(databaseURL: url)
             self.store = store
             activeLibraryURL = url
+            activeView = nil
             Self.rememberLastOpenedLibrary(at: url)
             recentLibraryURLs = Self.loadRecentLibraryURLs()
             try loadLibraryState(from: store, createEntryIfEmpty: true)
@@ -251,7 +258,13 @@ final class EntryListModel: ObservableObject {
 
     func updateActiveViewFilter(columnID: EntryColumn.ID?, value: String) {
         if let columnID {
-            updateActiveViewCriteria([ViewCriterion(columnID: columnID, value: value)])
+            var criteria = activeView?.criteria ?? []
+            if let index = criteria.firstIndex(where: { $0.columnID == columnID }) {
+                criteria[index].value = value
+            } else {
+                criteria.append(ViewCriterion(columnID: columnID, value: value))
+            }
+            updateActiveViewCriteria(criteria)
         } else {
             updateActiveViewCriteria([])
         }
@@ -276,6 +289,11 @@ final class EntryListModel: ObservableObject {
         } catch {
             errorMessage = "Could not update View criteria: \(error)"
         }
+    }
+
+    func removeActiveViewCriteria(ids: Set<ViewCriterion.ID>) {
+        guard let activeView, !ids.isEmpty else { return }
+        updateActiveViewCriteria(activeView.criteria.filter { !ids.contains($0.id) })
     }
 
     func saveActiveViewCriteriaAsCategoryRule(targetColumnID: EntryColumn.ID, categoryName: String) {
@@ -305,6 +323,7 @@ final class EntryListModel: ObservableObject {
             )
             try store.applyCategoryRulesToAllEntries()
             columnValues = try store.loadColumnValues()
+            columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
             try reloadCategoryNames()
             refreshVisibleEntries(force: true)
             errorMessage = nil
@@ -451,6 +470,10 @@ final class EntryListModel: ObservableObject {
         columnValues[EntryColumnValueKey(entryID: entryID, columnID: columnID)] ?? .empty
     }
 
+    func columnAssignmentInfo(entryID: Entry.ID, columnID: EntryColumn.ID) -> AssignmentInfo? {
+        columnAssignmentInfos[EntryColumnValueKey(entryID: entryID, columnID: columnID)]
+    }
+
     func columnAutocompleteSource(entryID: Entry.ID, columnID: EntryColumn.ID) -> String {
         let visibleColumnValues = visibleEntries
             .filter { $0.id != entryID }
@@ -484,6 +507,19 @@ final class EntryListModel: ObservableObject {
         persistColumnValue(entryID: entryID, columnID: columnID, value: value)
         applyCategoryRules(toEntryID: entryID)
         refreshVisibleEntries()
+    }
+
+    func markColumnValueExplicit(entryID: Entry.ID, columnID: EntryColumn.ID) {
+        guard let store else { return }
+        do {
+            try store.markColumnValueExplicit(entryID: entryID, columnID: columnID)
+            columnValues = try store.loadColumnValues()
+            columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
+            try reloadCategoryNames()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not mark assignment explicit: \(error)"
+        }
     }
 
     func saveColumnValueDraft(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
@@ -673,13 +709,18 @@ final class EntryListModel: ObservableObject {
             activeView = try store.loadDefaultView()
             views = try store.loadViews()
         } else {
-            activeView = views.first(where: { $0.id == activeView?.id }) ?? views.first(where: { $0.id == StructureView.defaultID }) ?? views.first
+            let rememberedViewID = activeLibraryURL.flatMap { Self.rememberedActiveViewID(for: $0) }
+            activeView = views.first(where: { $0.id == rememberedViewID })
+                ?? views.first(where: { $0.id == activeView?.id })
+                ?? views.first(where: { $0.id == StructureView.defaultID })
+                ?? views.first
         }
         allColumnNames = try store.loadAllColumnNames()
         sort = activeView?.sort ?? EntrySort()
         entries = try store.loadEntries()
         columns = try store.loadColumns(viewID: activeView?.id ?? StructureView.defaultID)
         columnValues = try store.loadColumnValues()
+        columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
         try reloadCategoryNames()
         editingEntryIDs = []
         editingColumnKeys = []
@@ -699,6 +740,7 @@ final class EntryListModel: ObservableObject {
         entries = []
         columns = []
         columnValues = [:]
+        columnAssignmentInfos = [:]
         categoryNamesByColumnID = [:]
         allColumnNames = []
         currentEntryID = nil
@@ -734,6 +776,7 @@ final class EntryListModel: ObservableObject {
             if let sourceColumnID {
                 try store.copyColumnValues(from: sourceColumnID, to: column.id)
                 columnValues = try store.loadColumnValues()
+                columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
             }
             allColumnNames = try store.loadAllColumnNames()
             try reloadCategoryNames()
@@ -747,6 +790,7 @@ final class EntryListModel: ObservableObject {
         guard let store else { return }
         do {
             try store.upsertColumnValue(entryID: entryID, columnID: columnID, value: value)
+            columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
             try reloadCategoryNames()
             errorMessage = nil
         } catch {
@@ -759,6 +803,7 @@ final class EntryListModel: ObservableObject {
         do {
             try store.applyCategoryRules(toEntryID: entryID)
             columnValues = try store.loadColumnValues()
+            columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
             try reloadCategoryNames()
             errorMessage = nil
         } catch {
@@ -835,10 +880,14 @@ final class EntryListModel: ObservableObject {
     private func activateView(id: StructureView.ID) throws {
         guard let store, let view = try store.loadView(id: id) else { return }
         activeView = view
+        if let activeLibraryURL {
+            Self.rememberActiveViewID(view.id, for: activeLibraryURL)
+        }
         sort = view.sort
         columns = try store.loadColumns(viewID: view.id)
         entries = try store.loadEntries()
         columnValues = try store.loadColumnValues()
+        columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
         allColumnNames = try store.loadAllColumnNames()
         try reloadCategoryNames()
         currentEntryID = entries.last?.id
@@ -953,6 +1002,17 @@ final class EntryListModel: ObservableObject {
         UserDefaults.standard.set(Array(paths), forKey: recentLibrariesPreferenceKey)
     }
 
+    private static func rememberedActiveViewID(for url: URL) -> StructureView.ID? {
+        let rememberedViews = UserDefaults.standard.dictionary(forKey: lastActiveViewByLibraryPreferenceKey) as? [String: String]
+        return rememberedViews?[url.path]
+    }
+
+    private static func rememberActiveViewID(_ viewID: StructureView.ID, for url: URL) {
+        var rememberedViews = UserDefaults.standard.dictionary(forKey: lastActiveViewByLibraryPreferenceKey) as? [String: String] ?? [:]
+        rememberedViews[url.path] = viewID
+        UserDefaults.standard.set(rememberedViews, forKey: lastActiveViewByLibraryPreferenceKey)
+    }
+
     private static func loadRecentLibraryURLs() -> [URL] {
         let paths = UserDefaults.standard.stringArray(forKey: recentLibrariesPreferenceKey) ?? []
         let existingPaths = paths.filter { FileManager.default.fileExists(atPath: $0) }
@@ -974,6 +1034,7 @@ final class EntryListModel: ObservableObject {
 
 private let lastOpenedLibraryPreferenceKey = "StructureLastOpenedLibraryURL"
 private let recentLibrariesPreferenceKey = "StructureRecentLibraryURLs"
+private let lastActiveViewByLibraryPreferenceKey = "StructureLastActiveViewByLibrary"
 
 enum ColumnDropPlacement {
     case before

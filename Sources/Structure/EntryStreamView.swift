@@ -11,20 +11,9 @@ struct EntryStreamView: View {
                 title: model.activeViewTitle,
                 activeViewID: model.activeView?.id,
                 views: model.views,
-                filterSummary: model.activeViewFilterSummary,
-                canFilter: model.canFilterActiveView && !model.columns.isEmpty,
-                canClearFilter: model.canClearActiveViewFilter,
                 hasOpenLibrary: model.hasOpenLibrary,
                 openView: model.openView,
-                createView: model.createView,
-                showCriteria: {
-                    viewCriteriaPanel(for: model)
-                },
-                clearCriteria: {
-                    confirmClearActiveViewCriteria(for: model)
-                },
-                rename: model.renameActiveView,
-                beginEditing: clearEntryFocus
+                createView: model.createView
             )
             FormattingBar()
             ScrollViewReader { proxy in
@@ -63,9 +52,11 @@ struct EntryStreamView: View {
                                         columnsAfterEntry: model.columnsAfterEntry,
                                         viewScale: viewScale,
                                         columnValue: model.columnValue,
+                                        columnAssignmentInfo: model.columnAssignmentInfo,
                                         columnAutocompleteSource: model.columnAutocompleteSource,
                                         saveColumnValueDraft: model.saveColumnValueDraft,
                                         updateColumnValue: model.updateColumnValue,
+                                        markColumnValueExplicit: model.markColumnValueExplicit,
                                         beginEntryEditing: model.beginEntryEditing,
                                         endEntryEditing: model.endEntryEditing,
                                         beginColumnEditing: model.beginColumnEditing,
