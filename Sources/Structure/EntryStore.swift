@@ -376,7 +376,7 @@ final class EntryStore {
     func updateViewCriteria(viewID: StructureView.ID, criteria: [ViewCriterion], updatedAt: Date = Date()) throws {
         try execute("BEGIN TRANSACTION;")
         do {
-            try updateLegacyViewFilterColumns(viewID: viewID, criterion: criteria.first, updatedAt: updatedAt)
+            try updateLegacyViewFilterColumns(viewID: viewID, criterion: nil, updatedAt: updatedAt)
             try deleteViewCriteria(viewID: viewID)
             for (index, criterion) in criteria.enumerated() {
                 try insertViewCriterion(criterion, viewID: viewID, orderIndex: index, updatedAt: updatedAt)
@@ -1562,17 +1562,16 @@ final class EntryStore {
     }
 
     private func categoryRule(_ rule: CategoryRule, matchesEntryID entryID: Entry.ID) throws -> Bool {
-        guard !rule.criteria.isEmpty else { return false }
-        for criterion in rule.criteria {
-            guard let value = try assignmentValue(
+        try CriteriaMatcher.matches(
+            criteria: rule.criteria,
+            key: \.sourceColumnDefinitionID,
+            normalizedValue: \.normalizedValue
+        ) { columnDefinitionID in
+            try assignmentValue(
                 entryID: entryID,
-                columnDefinitionID: criterion.sourceColumnDefinitionID
-            ) else { return false }
-            if value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != criterion.normalizedValue {
-                return false
-            }
+                columnDefinitionID: columnDefinitionID
+            )
         }
-        return true
     }
 
     private func assignmentValue(entryID: Entry.ID, columnDefinitionID: String) throws -> String? {

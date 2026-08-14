@@ -30,7 +30,24 @@ Expected result: the View shows only Entries whose selected column value is exac
 5. Confirm the second value field offers autocomplete suggestions from the selected `People` column.
 6. Click `Apply`.
 
-Expected result: the View shows only Entries matching both criteria. The relationship is `AND`, not `OR`.
+Expected result: the View shows only Entries matching both criteria. Different columns are combined as `AND`.
+
+## Create Multiple Criteria From The Same Column
+
+1. Open the same user-created View.
+2. Choose `Criteria > Add/Modify Criteria`.
+3. Add two Criteria from the same column, such as `Project = Proposal` and `Project = Budget`.
+4. Click `Apply`.
+
+Expected result: the View shows Entries whose Project is either `Proposal` or `Budget`. Multiple values from the same column are combined as `OR`.
+
+5. Add another Criteria from a different column, such as `People = Sarah Wells`.
+
+Expected result: the View shows Entries matching `(Project = Proposal OR Project = Budget) AND People = Sarah Wells`.
+
+6. Remove `People = Sarah Wells`.
+
+Expected result: the View refreshes immediately to show Entries whose Project is either `Proposal` or `Budget`.
 
 ## Edit Multiple Criteria
 
@@ -72,6 +89,8 @@ Expected result: Structure shows a removal dialog with checkboxes for each activ
 3. Check one Criteria and click `Remove Selected`.
 
 Expected result: only the checked Criteria is removed.
+
+Expected result: the View refreshes immediately after removal.
 
 4. Reopen `Criteria > Remove Criteria`, click `Select All`, then click `Remove Selected`.
 

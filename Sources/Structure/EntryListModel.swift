@@ -271,7 +271,7 @@ final class EntryListModel: ObservableObject {
     }
 
     func updateActiveViewCriteria(_ criteria: [ViewCriterion]) {
-        guard let store, var activeView else { return }
+        guard let store, let activeView else { return }
         let cleanedCriteria = criteria.compactMap { criterion -> ViewCriterion? in
             let trimmedValue = criterion.value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !criterion.columnID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -282,9 +282,7 @@ final class EntryListModel: ObservableObject {
 
         do {
             try store.updateViewCriteria(viewID: activeView.id, criteria: cleanedCriteria)
-            activeView.criteria = cleanedCriteria
-            self.activeView = activeView
-            try reloadViews(activeViewID: activeView.id)
+            try reloadAfterCriteriaChange(activeViewID: activeView.id)
             errorMessage = nil
         } catch {
             errorMessage = "Could not update View criteria: \(error)"
@@ -694,11 +692,12 @@ final class EntryListModel: ObservableObject {
     private func filtered(_ sourceEntries: [Entry]) -> [Entry] {
         guard let criteria = activeView?.criteria, !criteria.isEmpty else { return sourceEntries }
         return sourceEntries.filter { entry in
-            criteria.allSatisfy { criterion in
-                columnValue(entryID: entry.id, columnID: criterion.columnID)
-                    .text
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased() == criterion.normalizedValue
+            CriteriaMatcher.matches(
+                criteria: criteria,
+                key: \.columnID,
+                normalizedValue: \.normalizedValue
+            ) { columnID in
+                columnValue(entryID: entry.id, columnID: columnID).text
             }
         }
     }
@@ -875,6 +874,22 @@ final class EntryListModel: ObservableObject {
         } else {
             closeView()
         }
+    }
+
+    private func reloadAfterCriteriaChange(activeViewID: StructureView.ID) throws {
+        guard let store, let view = try store.loadView(id: activeViewID) else { return }
+        views = try store.loadViews()
+        activeView = view
+        sort = view.sort
+        columns = try store.loadColumns(viewID: view.id)
+        entries = try store.loadEntries()
+        columnValues = try store.loadColumnValues()
+        columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
+        allColumnNames = try store.loadAllColumnNames()
+        try reloadCategoryNames()
+        editingEntryIDs = []
+        editingColumnKeys = []
+        refreshVisibleEntries(force: true)
     }
 
     private func activateView(id: StructureView.ID) throws {

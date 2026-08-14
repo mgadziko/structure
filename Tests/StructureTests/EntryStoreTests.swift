@@ -205,14 +205,36 @@ final class EntryStoreTests: XCTestCase {
         try store.updateViewCriteria(viewID: view.id, criteria: criteria, updatedAt: timestamp)
 
         XCTAssertEqual(try store.loadView(id: view.id)?.criteria, criteria)
-        XCTAssertEqual(
-            try store.loadView(id: view.id)?.filter,
-            ViewFilter(columnID: "project-column", value: "Proposal")
-        )
+        XCTAssertEqual(try store.loadView(id: view.id)?.filter, ViewFilter(columnID: "project-column", value: "Proposal"))
 
         try store.updateViewCriteria(viewID: view.id, criteria: [], updatedAt: timestamp)
         XCTAssertEqual(try store.loadView(id: view.id)?.criteria, [])
         XCTAssertNil(try store.loadView(id: view.id)?.filter)
+    }
+
+    func testViewCriteriaClearDoesNotResurrectLegacyFilterColumns() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let view = StructureView(
+            id: "view-1",
+            title: "Filtered",
+            sort: EntrySort(column: .body, direction: .ascending),
+            showsCreatedColumn: false,
+            createdAt: timestamp,
+            updatedAt: timestamp
+        )
+
+        try store.insertView(view)
+        try store.updateViewCriteria(
+            viewID: view.id,
+            criteria: [ViewCriterion(id: "criterion-1", columnID: "project-column", value: "Proposal")],
+            updatedAt: timestamp
+        )
+        try store.updateViewCriteria(viewID: view.id, criteria: [], updatedAt: timestamp)
+
+        let loadedView = try XCTUnwrap(try store.loadView(id: view.id))
+        XCTAssertEqual(loadedView.criteria, [])
+        XCTAssertNil(loadedView.filter)
     }
 
     func testViewCriteriaAllowsMultipleValuesFromSameColumn() throws {
@@ -819,6 +841,120 @@ final class EntryStoreTests: XCTestCase {
         )
         XCTAssertNil(try store.loadColumnValues()[EntryColumnValueKey(entryID: otherEntry.id, columnID: peopleColumn.id)])
         XCTAssertEqual(try store.loadCategoryAssignments(columnID: peopleColumn.id), [matchingEntry.id: "Sarah"])
+    }
+
+    func testCategoryRuleMatchesAnyCriteriaValueWithinSameColumnAndAllColumnsAcrossGroups() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let proposalActiveEntry = Entry(
+            id: "entry-1",
+            body: "Proposal active",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let budgetActiveEntry = Entry(
+            id: "entry-2",
+            body: "Budget active",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let pledgeActiveEntry = Entry(
+            id: "entry-3",
+            body: "Pledge active",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let proposalInactiveEntry = Entry(
+            id: "entry-4",
+            body: "Proposal inactive",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let projectColumn = EntryColumn(
+            id: "project-column",
+            title: "Project",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+        let standingColumn = EntryColumn(
+            id: "standing-column",
+            title: "Standing",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 180
+        )
+        let peopleColumn = EntryColumn(
+            id: "people-column",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 2,
+            width: 180,
+            definition: .category
+        )
+
+        for entry in [proposalActiveEntry, budgetActiveEntry, pledgeActiveEntry, proposalInactiveEntry] {
+            try store.insert(entry)
+        }
+        try store.insertColumn(projectColumn, createdAt: timestamp)
+        try store.insertColumn(standingColumn, createdAt: timestamp)
+        try store.insertColumn(peopleColumn, createdAt: timestamp)
+
+        let values: [(Entry.ID, EntryColumn.ID, String)] = [
+            (proposalActiveEntry.id, projectColumn.id, "Proposal"),
+            (proposalActiveEntry.id, standingColumn.id, "Active"),
+            (budgetActiveEntry.id, projectColumn.id, "Budget"),
+            (budgetActiveEntry.id, standingColumn.id, "Active"),
+            (pledgeActiveEntry.id, projectColumn.id, "Pledge"),
+            (pledgeActiveEntry.id, standingColumn.id, "Active"),
+            (proposalInactiveEntry.id, projectColumn.id, "Proposal"),
+            (proposalInactiveEntry.id, standingColumn.id, "Inactive")
+        ]
+        for (entryID, columnID, text) in values {
+            try store.upsertColumnValue(
+                entryID: entryID,
+                columnID: columnID,
+                value: EntryColumnValue(text: text, richTextData: nil),
+                updatedAt: timestamp
+            )
+        }
+
+        _ = try store.upsertCategoryRule(
+            targetColumnDefinitionID: peopleColumn.definitionID,
+            categoryName: "Sarah",
+            criteria: [
+                CategoryRuleCriterion(sourceColumnDefinitionID: projectColumn.definitionID, value: "Proposal"),
+                CategoryRuleCriterion(sourceColumnDefinitionID: projectColumn.definitionID, value: "Budget"),
+                CategoryRuleCriterion(sourceColumnDefinitionID: standingColumn.definitionID, value: "Active")
+            ],
+            updatedAt: timestamp
+        )
+
+        try store.applyCategoryRulesToAllEntries(updatedAt: timestamp)
+
+        let columnValues = try store.loadColumnValues()
+        XCTAssertEqual(
+            columnValues[EntryColumnValueKey(entryID: proposalActiveEntry.id, columnID: peopleColumn.id)],
+            EntryColumnValue(text: "Sarah", richTextData: nil)
+        )
+        XCTAssertEqual(
+            columnValues[EntryColumnValueKey(entryID: budgetActiveEntry.id, columnID: peopleColumn.id)],
+            EntryColumnValue(text: "Sarah", richTextData: nil)
+        )
+        XCTAssertNil(columnValues[EntryColumnValueKey(entryID: pledgeActiveEntry.id, columnID: peopleColumn.id)])
+        XCTAssertNil(columnValues[EntryColumnValueKey(entryID: proposalInactiveEntry.id, columnID: peopleColumn.id)])
     }
 
     func testCategoryRuleAssignmentInfoRoundTripsAndCanBecomeExplicit() throws {
