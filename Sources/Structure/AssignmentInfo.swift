@@ -3,6 +3,7 @@ import Foundation
 enum AssignmentSource: String, Equatable {
     case explicit
     case categoryRule = "category_rule"
+    case entryTextRecognition = "entry_text_recognition"
     case other
 
     init(storageValue: String) {
@@ -11,6 +12,8 @@ enum AssignmentSource: String, Equatable {
             self = .explicit
         case "category_rule":
             self = .categoryRule
+        case "entry_text_recognition":
+            self = .entryTextRecognition
         default:
             self = .other
         }
@@ -22,6 +25,8 @@ enum AssignmentSource: String, Equatable {
             return "Explicit"
         case .categoryRule:
             return "Category Rule"
+        case .entryTextRecognition:
+            return "Entry Text Recognition"
         case .other:
             return "Other"
         }
@@ -33,6 +38,6 @@ struct AssignmentInfo: Equatable {
     var sourceDetail: String?
 
     var isRuleCreated: Bool {
-        source == .categoryRule
+        source == .categoryRule || source == .entryTextRecognition
     }
 }

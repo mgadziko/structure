@@ -24,3 +24,11 @@ struct CategoryRuleCriterion: Identifiable, Equatable {
         value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }
+
+struct CategoryRuleSummary: Identifiable, Equatable {
+    let id: CategoryRule.ID
+    var targetColumnTitle: String
+    var categoryName: String
+    var criteriaText: String
+    var updatedAt: Date
+}

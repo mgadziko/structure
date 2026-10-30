@@ -16,6 +16,7 @@ final class EntryListModel: ObservableObject {
     @Published private(set) var visibleEntries: [Entry] = []
     @Published private(set) var activeLibraryURL: URL?
     @Published private(set) var allColumnNames: [String] = []
+    @Published private(set) var categoryRules: [CategoryRule] = []
     @Published private(set) var recentLibraryURLs: [URL] = []
     @Published var findText = ""
 
@@ -23,6 +24,7 @@ final class EntryListModel: ObservableObject {
     private var editingEntryIDs: Set<Entry.ID> = []
     private var editingColumnKeys: Set<EntryColumnValueKey> = []
     private var preferredInitialViewID: StructureView.ID?
+    private var columnDefinitionSummaries: [ColumnDefinitionSummary] = []
 
     init(initialViewID: StructureView.ID? = nil) {
         preferredInitialViewID = initialViewID
@@ -104,6 +106,28 @@ final class EntryListModel: ObservableObject {
         return columns.contains { $0.definition == .category }
     }
 
+    var hasCategoryRules: Bool {
+        !categoryRules.isEmpty
+    }
+
+    var categoryRuleSummaries: [CategoryRuleSummary] {
+        let definitionTitleByID = Dictionary(uniqueKeysWithValues: columnDefinitionSummaries.map { ($0.id, $0.title) })
+        return categoryRules.map { rule in
+            let criteriaText = rule.criteria.map { criterion in
+                let title = definitionTitleByID[criterion.sourceColumnDefinitionID] ?? "Unknown Column"
+                return "\(title) = \(criterion.value)"
+            }
+            .joined(separator: " and ")
+            return CategoryRuleSummary(
+                id: rule.id,
+                targetColumnTitle: definitionTitleByID[rule.targetColumnDefinitionID] ?? "Unknown Category",
+                categoryName: rule.categoryName,
+                criteriaText: criteriaText.isEmpty ? "No Criteria" : criteriaText,
+                updatedAt: rule.updatedAt
+            )
+        }
+    }
+
     var categoryRuleTargetColumns: [EntryColumn] {
         columns
             .filter { $0.definition == .category }
@@ -140,14 +164,71 @@ final class EntryListModel: ObservableObject {
         currentEntryID = entry.id
         persistInsert(entry)
 
-        for criterion in activeView?.criteria ?? [] {
+        for criterion in criteriaAutofillValues() {
             let value = EntryColumnValue(text: criterion.value, richTextData: nil)
             columnValues[EntryColumnValueKey(entryID: entry.id, columnID: criterion.columnID)] = value
             persistColumnValue(entryID: entry.id, columnID: criterion.columnID, value: value)
         }
-        applyCategoryRules(toEntryID: entry.id)
 
         refreshVisibleEntries(force: true)
+    }
+
+    func importOneNoteNotebook(at url: URL) {
+        guard let store, activeView != nil else {
+            errorMessage = "Open a Library and View before importing a OneNote notebook."
+            return
+        }
+
+        let didAccessSecurityScopedResource = url.startAccessingSecurityScopedResource()
+        defer {
+            if didAccessSecurityScopedResource {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        do {
+            let blocks = try OneNoteHTMLImporter.load(from: url)
+            guard !blocks.isEmpty else {
+                errorMessage = "The selected OneNote export did not contain any importable page content."
+                return
+            }
+
+            let importColumns = try ensureOneNoteImportColumns()
+            let now = Date()
+            for block in blocks {
+                let entry = Entry(
+                    id: UUID().uuidString,
+                    body: block.body,
+                    bodyMarkdown: block.body,
+                    richTextData: nil,
+                    createdAt: now,
+                    updatedAt: now,
+                    capturedAt: now,
+                    deletedAt: nil
+                )
+                try store.insert(entry)
+                let metadata = [
+                    "OneNote Page Name": block.pageName,
+                    "OneNote Notebook": block.notebook,
+                    "OneNote Section": block.section,
+                    "OneNote Block Type": block.blockType,
+                    "OneNote Block Order": String(block.blockOrder)
+                ]
+                for (title, value) in metadata {
+                    guard let columnID = importColumns[title] else { continue }
+                    try store.upsertColumnValue(
+                        entryID: entry.id,
+                        columnID: columnID,
+                        value: EntryColumnValue(text: value, markdownText: nil, richTextData: nil),
+                        source: "onenote_import"
+                    )
+                }
+            }
+            try loadLibraryState(from: store, createEntryIfEmpty: false)
+            errorMessage = "Imported \(blocks.count) OneNote blocks from \(url.lastPathComponent)."
+        } catch {
+            errorMessage = "Could not import OneNote notebook: \(error.localizedDescription)"
+        }
     }
 
     func openLibrary(at url: URL) {
@@ -335,11 +416,40 @@ final class EntryListModel: ObservableObject {
             try store.applyCategoryRulesToAllEntries()
             columnValues = try store.loadColumnValues()
             columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
+            categoryRules = try store.loadCategoryRules()
+            columnDefinitionSummaries = try store.loadColumnDefinitionSummaries()
             try reloadCategoryNames()
             refreshVisibleEntries(force: true)
             errorMessage = nil
         } catch {
             errorMessage = "Could not save Category rule: \(error)"
+        }
+    }
+
+    func deleteCategoryRule(id ruleID: CategoryRule.ID) {
+        guard let store else { return }
+        do {
+            try store.deleteCategoryRule(id: ruleID)
+            categoryRules = try store.loadCategoryRules()
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not delete Category rule: \(error)"
+        }
+    }
+
+    func applyCategoryRulesToCurrentView() {
+        guard let store else { return }
+        do {
+            for entry in visibleEntries {
+                try store.applyCategoryRules(toEntryID: entry.id)
+            }
+            columnValues = try store.loadColumnValues()
+            columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
+            try reloadCategoryNames()
+            refreshVisibleEntries(force: true)
+            errorMessage = nil
+        } catch {
+            errorMessage = "Could not apply Category rules: \(error)"
         }
     }
 
@@ -349,6 +459,7 @@ final class EntryListModel: ObservableObject {
         entries[index].updatedAt = Date()
         refreshVisibleEntries()
         persistUpdate(entries[index])
+        recognizeEntryText(forEntryID: id)
     }
 
     func updateRichText(for id: Entry.ID, body: String, richTextData: Data?) {
@@ -358,6 +469,7 @@ final class EntryListModel: ObservableObject {
         entries[index].updatedAt = Date()
         refreshVisibleEntries()
         persistUpdate(entries[index])
+        recognizeEntryText(forEntryID: id)
     }
 
     private func sorted(_ sourceEntries: [Entry]) -> [Entry] {
@@ -517,7 +629,7 @@ final class EntryListModel: ObservableObject {
         columnValues[key] = value
         persistColumnValue(entryID: entryID, columnID: columnID, value: value)
         applyCategoryRules(toEntryID: entryID)
-        refreshVisibleEntries()
+        refreshVisibleEntries(force: true)
     }
 
     func markColumnValueExplicit(entryID: Entry.ID, columnID: EntryColumn.ID) {
@@ -538,6 +650,7 @@ final class EntryListModel: ObservableObject {
     }
 
     func beginEntryEditing(entryID: Entry.ID) {
+        currentEntryID = entryID
         editingEntryIDs.insert(entryID)
     }
 
@@ -705,13 +818,38 @@ final class EntryListModel: ObservableObject {
     private func filtered(_ sourceEntries: [Entry]) -> [Entry] {
         guard let criteria = activeView?.criteria, !criteria.isEmpty else { return sourceEntries }
         return sourceEntries.filter { entry in
-            CriteriaMatcher.matches(
+            if shouldKeepVisibleWhileCapturing(entry) {
+                return true
+            }
+            return CriteriaMatcher.matches(
                 criteria: criteria,
                 key: \.columnID,
                 normalizedValue: \.normalizedValue
             ) { columnID in
                 columnValue(entryID: entry.id, columnID: columnID).text
             }
+        }
+    }
+
+    private func shouldKeepVisibleWhileCapturing(_ entry: Entry) -> Bool {
+        if editingEntryIDs.contains(entry.id) {
+            return true
+        }
+        if editingColumnKeys.contains(where: { $0.entryID == entry.id }) {
+            return true
+        }
+        guard entry.id == currentEntryID else { return false }
+        return entry.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func criteriaAutofillValues() -> [ViewCriterion] {
+        let criteriaByColumnID = Dictionary(grouping: activeView?.criteria ?? [], by: \.columnID)
+        return criteriaByColumnID.values.compactMap { criteria in
+            let uniqueValues = deduplicatedAutocompleteLines(criteria.map(\.value))
+            guard criteria.count == 1, let criterion = criteria.first, uniqueValues.count == 1 else {
+                return nil
+            }
+            return criterion
         }
     }
 
@@ -731,6 +869,8 @@ final class EntryListModel: ObservableObject {
                 ?? views.first
         }
         allColumnNames = try store.loadAllColumnNames()
+        columnDefinitionSummaries = try store.loadColumnDefinitionSummaries()
+        categoryRules = try store.loadCategoryRules()
         sort = activeView?.sort ?? EntrySort()
         entries = try store.loadEntries()
         columns = try store.loadColumns(viewID: activeView?.id ?? StructureView.defaultID)
@@ -748,6 +888,25 @@ final class EntryListModel: ObservableObject {
         }
     }
 
+    private func ensureOneNoteImportColumns() throws -> [String: EntryColumn.ID] {
+        let titles = [
+            "OneNote Page Name",
+            "OneNote Notebook",
+            "OneNote Section",
+            "OneNote Block Type",
+            "OneNote Block Order"
+        ]
+        for title in titles where !columns.contains(where: { normalizedName($0.title) == normalizedName(title) }) {
+            addColumn(named: title, placement: .afterEntry)
+        }
+        return Dictionary(uniqueKeysWithValues: columns.compactMap { column in
+            guard let title = titles.first(where: { normalizedName($0) == normalizedName(column.title) }) else {
+                return nil
+            }
+            return (title, column.id)
+        })
+    }
+
     private func clearLibraryState() {
         activeView = nil
         views = []
@@ -757,6 +916,8 @@ final class EntryListModel: ObservableObject {
         columnValues = [:]
         columnAssignmentInfos = [:]
         categoryNamesByColumnID = [:]
+        categoryRules = []
+        columnDefinitionSummaries = []
         allColumnNames = []
         currentEntryID = nil
         visibleEntries = []
@@ -801,10 +962,15 @@ final class EntryListModel: ObservableObject {
         }
     }
 
-    private func persistColumnValue(entryID: Entry.ID, columnID: EntryColumn.ID, value: EntryColumnValue) {
+    private func persistColumnValue(
+        entryID: Entry.ID,
+        columnID: EntryColumn.ID,
+        value: EntryColumnValue,
+        source: String = "column_edit"
+    ) {
         guard let store else { return }
         do {
-            try store.upsertColumnValue(entryID: entryID, columnID: columnID, value: value)
+            try store.upsertColumnValue(entryID: entryID, columnID: columnID, value: value, source: source)
             columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
             try reloadCategoryNames()
             errorMessage = nil
@@ -902,6 +1068,8 @@ final class EntryListModel: ObservableObject {
         columnValues = try store.loadColumnValues()
         columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
         allColumnNames = try store.loadAllColumnNames()
+        columnDefinitionSummaries = try store.loadColumnDefinitionSummaries()
+        categoryRules = try store.loadCategoryRules()
         try reloadCategoryNames()
         editingEntryIDs = []
         editingColumnKeys = []
@@ -920,6 +1088,8 @@ final class EntryListModel: ObservableObject {
         columnValues = try store.loadColumnValues()
         columnAssignmentInfos = try store.loadColumnValueAssignmentInfo()
         allColumnNames = try store.loadAllColumnNames()
+        columnDefinitionSummaries = try store.loadColumnDefinitionSummaries()
+        categoryRules = try store.loadCategoryRules()
         try reloadCategoryNames()
         currentEntryID = entries.last?.id
         editingEntryIDs = []
@@ -947,6 +1117,100 @@ final class EntryListModel: ObservableObject {
             namesByColumn[column.id] = try store.loadCategoryNames(columnID: column.id)
         }
         categoryNamesByColumnID = namesByColumn
+    }
+
+    private func recognizeEntryText(forEntryID entryID: Entry.ID) {
+        guard let entry = entries.first(where: { $0.id == entryID }),
+              !entry.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return }
+
+        var changed = false
+        for column in columns {
+            let key = EntryColumnValueKey(entryID: entryID, columnID: column.id)
+            if let recognizedName = recognizedColumnValue(in: entry.body, entryID: entryID, columnID: column.id) {
+                guard shouldApplyRecognizedValue(recognizedName, to: key) else { continue }
+
+                let value = EntryColumnValue(text: recognizedName, richTextData: nil)
+                columnValues[key] = value
+                persistColumnValue(
+                    entryID: entryID,
+                    columnID: column.id,
+                    value: value,
+                    source: AssignmentSource.entryTextRecognition.rawValue
+                )
+                changed = true
+            } else if shouldClearStaleRecognizedValue(for: key) {
+                columnValues[key] = .empty
+                persistColumnValue(
+                    entryID: entryID,
+                    columnID: column.id,
+                    value: .empty,
+                    source: AssignmentSource.entryTextRecognition.rawValue
+                )
+                changed = true
+            }
+        }
+
+        if changed {
+            applyCategoryRules(toEntryID: entryID)
+            refreshVisibleEntries(force: true)
+        }
+    }
+
+    private func shouldApplyRecognizedValue(
+        _ recognizedValue: String,
+        to key: EntryColumnValueKey
+    ) -> Bool {
+        let existingValue = columnValues[key, default: .empty].text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if existingValue.isEmpty {
+            return true
+        }
+
+        guard normalizedName(existingValue) != normalizedName(recognizedValue) else {
+            return false
+        }
+
+        guard let assignmentSource = columnAssignmentInfos[key]?.source else { return false }
+        switch assignmentSource {
+        case .categoryRule:
+            return true
+        case .entryTextRecognition:
+            return true
+        case .explicit, .other:
+            return false
+        }
+    }
+
+    private func shouldClearStaleRecognizedValue(for key: EntryColumnValueKey) -> Bool {
+        let existingValue = columnValues[key, default: .empty].text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !existingValue.isEmpty else { return false }
+        return columnAssignmentInfos[key]?.source == .entryTextRecognition
+    }
+
+    private func recognizedColumnValue(in entryText: String, entryID: Entry.ID, columnID: EntryColumn.ID) -> String? {
+        let categoryNames = categoryNamesByColumnID[columnID] ?? []
+        let priorColumnValues = entries
+            .filter { $0.id != entryID }
+            .compactMap { entry in
+                let value = columnValue(entryID: entry.id, columnID: columnID).text
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return value.isEmpty ? nil : value
+            }
+        return deduplicatedAutocompleteLines(categoryNames + priorColumnValues)
+            .compactMap { candidate -> (value: String, location: Int)? in
+                guard let location = EntryTextRecognition.firstMatchLocation(of: candidate, in: entryText) else {
+                    return nil
+                }
+                return (candidate, location)
+            }
+            .sorted { lhs, rhs in
+                if lhs.location != rhs.location { return lhs.location < rhs.location }
+                if lhs.value.count != rhs.value.count { return lhs.value.count > rhs.value.count }
+                return lhs.value.localizedStandardCompare(rhs.value) == .orderedAscending
+            }
+            .first?.value
     }
 
     private func deduplicatedAutocompleteLines(_ values: [String]) -> [String] {

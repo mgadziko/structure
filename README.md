@@ -39,6 +39,13 @@ Build the runnable macOS app bundle:
 ./scripts/build-macos-app.sh
 ```
 
+### Xcode
+
+Open `Structure.xcodeproj` in Xcode and select the **Structure** scheme. The
+project builds the existing app sources directly, includes the `StructureTests`
+unit-test target, links macOS's SQLite library, and keeps the bundle identifier
+as `net.quantumpenguin.Structure`.
+
 The current app bundle is written to:
 
 ```text
@@ -50,3 +57,7 @@ The prototype stores local data at:
 ```text
 ~/Library/Application Support/Structure/Structure.sqlite
 ```
+
+## Bundle identifier
+
+The macOS app bundle uses `net.quantumpenguin.Structure`. Use the `net.quantumpenguin.*` namespace for new app and extension targets.

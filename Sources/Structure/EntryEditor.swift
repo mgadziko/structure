@@ -264,8 +264,8 @@ private struct UndefinedColumnCell: View {
                 .buttonStyle(.plain)
                 .background(Color(nsColor: .textBackgroundColor).opacity(0.86))
                 .clipShape(Circle())
-                .help("Rule-filled assignment")
-                .accessibilityLabel("Rule-filled assignment")
+                .help("Automatic assignment")
+                .accessibilityLabel("Automatic assignment")
                 .offset(x: CGFloat(width) - 22, y: 2)
             }
         }
@@ -344,7 +344,7 @@ private struct AssignmentInspector: View {
             }
             .font(.system(size: 13))
 
-            Text("Rule-filled assignments are added only when the cell was empty. Making this explicit keeps the current value and treats it as user-entered.")
+            Text("Automatic assignments are added only when the cell was empty. Making this explicit keeps the current value and treats it as user-entered.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

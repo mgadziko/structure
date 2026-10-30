@@ -157,3 +157,9 @@ struct EntryColumnValue: Equatable {
 
     static let empty = EntryColumnValue(text: "", markdownText: nil, richTextData: nil)
 }
+
+struct ColumnDefinitionSummary: Identifiable, Equatable {
+    let id: String
+    var title: String
+    var definition: EntryColumnDefinition
+}

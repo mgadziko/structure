@@ -1084,6 +1084,88 @@ final class EntryStoreTests: XCTestCase {
         XCTAssertEqual(try store.loadCategoryAssignments(columnID: peopleColumn.id), [entry.id: "Bob"])
     }
 
+    func testCategoryRuleDeleteRemovesRuleFromManagementList() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let projectColumn = EntryColumn(
+            id: "project-column",
+            title: "Project",
+            placement: .afterEntry,
+            orderIndex: 0,
+            width: 180
+        )
+        let peopleColumn = EntryColumn(
+            id: "people-column",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insertColumn(projectColumn, createdAt: timestamp)
+        try store.insertColumn(peopleColumn, createdAt: timestamp)
+        let rule = try store.upsertCategoryRule(
+            targetColumnDefinitionID: peopleColumn.definitionID,
+            categoryName: "Sarah",
+            criteria: [
+                CategoryRuleCriterion(sourceColumnDefinitionID: projectColumn.definitionID, value: "Proposal")
+            ],
+            updatedAt: timestamp
+        )
+
+        XCTAssertEqual(try store.loadCategoryRules(), [rule])
+
+        try store.deleteCategoryRule(id: rule.id, updatedAt: timestamp)
+
+        XCTAssertEqual(try store.loadCategoryRules(), [])
+    }
+
+    func testEntryTextRecognitionAssignmentInfoRoundTripsAndCanBecomeExplicit() throws {
+        let store = try EntryStore(databaseURL: temporaryDatabaseURL())
+        let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
+        let entry = Entry(
+            id: "entry-1",
+            body: "Call Sarah",
+            richTextData: nil,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            capturedAt: timestamp,
+            deletedAt: nil
+        )
+        let peopleColumn = EntryColumn(
+            id: "people-column",
+            title: "People",
+            placement: .afterEntry,
+            orderIndex: 1,
+            width: 180,
+            definition: .category
+        )
+
+        try store.insert(entry)
+        try store.insertColumn(peopleColumn, createdAt: timestamp)
+        try store.upsertColumnValue(
+            entryID: entry.id,
+            columnID: peopleColumn.id,
+            value: EntryColumnValue(text: "Sarah", richTextData: nil),
+            updatedAt: timestamp,
+            source: AssignmentSource.entryTextRecognition.rawValue
+        )
+
+        let key = EntryColumnValueKey(entryID: entry.id, columnID: peopleColumn.id)
+        XCTAssertEqual(
+            try store.loadColumnValueAssignmentInfo()[key],
+            AssignmentInfo(source: .entryTextRecognition, sourceDetail: "Entry text")
+        )
+
+        try store.markColumnValueExplicit(entryID: entry.id, columnID: peopleColumn.id, updatedAt: timestamp)
+
+        XCTAssertEqual(
+            try store.loadColumnValueAssignmentInfo()[key],
+            AssignmentInfo(source: .explicit, sourceDetail: nil)
+        )
+    }
+
     func testLegacyColumnValuesMigrateRichTextColumn() throws {
         let databaseURL = try temporaryDatabaseURL()
         try createLegacyColumnValueDatabase(at: databaseURL)

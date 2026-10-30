@@ -1,0 +1,129 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* StructureIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* StructureIcon.icns */; };
+		A10000000000000000000003 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* XCTest.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000002 /* StructureIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/StructureIcon.icns; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000004 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		A10000000000000000000005 /* Structure.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Structure.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000000000000000000006 /* StructureTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StructureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000007 /* Structure */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Sources/Structure; sourceTree = SOURCE_ROOT; };
+		A10000000000000000000008 /* StructureTests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Tests/StructureTests; sourceTree = SOURCE_ROOT; };
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1000000000000000000000A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A10000000000000000000003 /* XCTest.framework in Frameworks */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A1000000000000000000000B = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000007 /* Structure */,
+				A10000000000000000000008 /* StructureTests */,
+				A10000000000000000000002 /* StructureIcon.icns */,
+				A1000000000000000000000C /* Frameworks */,
+				A1000000000000000000000D /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A1000000000000000000000C /* Frameworks */ = {isa = PBXGroup; children = (A10000000000000000000004 /* XCTest.framework */,); name = Frameworks; sourceTree = "<group>"; };
+		A1000000000000000000000D /* Products */ = {isa = PBXGroup; children = (A10000000000000000000005 /* Structure.app */, A10000000000000000000006 /* StructureTests.xctest */); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1000000000000000000000E /* Structure */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000F /* Build configuration list for PBXNativeTarget "Structure" */;
+			buildPhases = (A10000000000000000000010 /* Sources */, A10000000000000000000009 /* Frameworks */, A10000000000000000000011 /* Resources */);
+			buildRules = ();
+			dependencies = ();
+			fileSystemSynchronizedGroups = (A10000000000000000000007 /* Structure */);
+			name = Structure;
+			productName = Structure;
+			productReference = A10000000000000000000005 /* Structure.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A10000000000000000000012 /* StructureTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000000000000000000013 /* Build configuration list for PBXNativeTarget "StructureTests" */;
+			buildPhases = (A10000000000000000000014 /* Sources */, A1000000000000000000000A /* Frameworks */);
+			buildRules = ();
+			dependencies = (A10000000000000000000015 /* PBXTargetDependency */);
+			fileSystemSynchronizedGroups = (A10000000000000000000008 /* StructureTests */);
+			name = StructureTests;
+			productName = StructureTests;
+			productReference = A10000000000000000000006 /* StructureTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000016 /* Project object */ = {
+			isa = PBXProject;
+			attributes = { BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2700; LastUpgradeCheck = 2700; TargetAttributes = { A1000000000000000000000E = { CreatedOnToolsVersion = 27.0; }; A10000000000000000000012 = { CreatedOnToolsVersion = 27.0; TestTargetID = A1000000000000000000000E; }; }; };
+			buildConfigurationList = A10000000000000000000017 /* Build configuration list for PBXProject "Structure" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base);
+			mainGroup = A1000000000000000000000B;
+			productRefGroup = A1000000000000000000000D /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A1000000000000000000000E /* Structure */, A10000000000000000000012 /* StructureTests */);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000011 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001 /* StructureIcon.icns in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000010 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		A10000000000000000000014 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10000000000000000000015 /* PBXTargetDependency */ = {isa = PBXTargetDependency; target = A1000000000000000000000E /* Structure */; };
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A10000000000000000000018 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_VERSION = 5.9; }; name = Debug; };
+		A10000000000000000000019 /* Release */ = {isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; CODE_SIGN_STYLE = Automatic; MACOSX_DEPLOYMENT_TARGET = 13.0; SDKROOT = macosx; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 5.9; }; name = Release; };
+		A1000000000000000000001A /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = ""; CODE_SIGN_STYLE = Automatic; ENABLE_TESTABILITY = YES; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Structure; INFOPLIST_KEY_CFBundleIconFile = StructureIcon; INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity"; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; OTHER_LDFLAGS = "-lsqlite3"; PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Structure; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CSQLite"; SWIFT_VERSION = 5.9; }; name = Debug; };
+		A1000000000000000000001B /* Release */ = {isa = XCBuildConfiguration; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = ""; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = Structure; INFOPLIST_KEY_CFBundleIconFile = StructureIcon; INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity"; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks"; OTHER_LDFLAGS = "-lsqlite3"; PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.Structure; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CSQLite"; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 5.9; }; name = Release; };
+		A1000000000000000000001C /* Debug */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.StructureTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CSQLite"; SWIFT_VERSION = 5.9; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Structure.app/Contents/MacOS/Structure"; TEST_TARGET_NAME = Structure; }; name = Debug; };
+		A1000000000000000000001D /* Release */ = {isa = XCBuildConfiguration; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = net.quantumpenguin.StructureTests; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_INCLUDE_PATHS = "$(SRCROOT)/Sources/CSQLite"; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 5.9; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Structure.app/Contents/MacOS/Structure"; TEST_TARGET_NAME = Structure; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000000F /* Build configuration list for PBXNativeTarget "Structure" */ = {isa = XCConfigurationList; buildConfigurations = (A1000000000000000000001A /* Debug */, A1000000000000000000001B /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000013 /* Build configuration list for PBXNativeTarget "StructureTests" */ = {isa = XCConfigurationList; buildConfigurations = (A1000000000000000000001C /* Debug */, A1000000000000000000001D /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		A10000000000000000000017 /* Build configuration list for PBXProject "Structure" */ = {isa = XCConfigurationList; buildConfigurations = (A10000000000000000000018 /* Debug */, A10000000000000000000019 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = A10000000000000000000016 /* Project object */;
+}

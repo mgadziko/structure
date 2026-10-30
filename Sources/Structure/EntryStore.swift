@@ -183,6 +183,34 @@ final class EntryStore {
         return names
     }
 
+    func loadColumnDefinitionSummaries() throws -> [ColumnDefinitionSummary] {
+        let sql = """
+        SELECT id, title, definition_kind
+        FROM column_definitions
+        WHERE deleted_at IS NULL
+        ORDER BY title COLLATE NOCASE ASC;
+        """
+        var statement: OpaquePointer?
+        try prepare(sql, statement: &statement)
+        defer { sqlite3_finalize(statement) }
+
+        var summaries: [ColumnDefinitionSummary] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard
+                let idText = sqlite3_column_text(statement, 0),
+                let titleText = sqlite3_column_text(statement, 1)
+            else { continue }
+
+            let definitionText = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? EntryColumnDefinition.none.rawValue
+            summaries.append(ColumnDefinitionSummary(
+                id: String(cString: idText),
+                title: String(cString: titleText),
+                definition: EntryColumnDefinition(storageValue: definitionText)
+            ))
+        }
+        return summaries
+    }
+
     func loadColumnTemplate(named title: String) throws -> EntryColumn? {
         let sql = """
         SELECT c.id, c.column_definition_id, c.view_id, d.title, c.placement, c.order_index, c.width, d.definition_kind
@@ -545,6 +573,44 @@ final class EntryStore {
         return rules
     }
 
+    func deleteCategoryRule(id ruleID: CategoryRule.ID, updatedAt: Date = Date()) throws {
+        try execute("BEGIN TRANSACTION;")
+        do {
+            let ruleSQL = """
+            UPDATE category_rules
+            SET deleted_at = ?, updated_at = ?
+            WHERE id = ?;
+            """
+            var ruleStatement: OpaquePointer?
+            try prepare(ruleSQL, statement: &ruleStatement)
+            defer { sqlite3_finalize(ruleStatement) }
+
+            sqlite3_bind_double(ruleStatement, 1, updatedAt.timeIntervalSince1970)
+            sqlite3_bind_double(ruleStatement, 2, updatedAt.timeIntervalSince1970)
+            sqlite3_bind_text(ruleStatement, 3, ruleID, -1, SQLITE_TRANSIENT)
+            try step(ruleStatement)
+
+            let criteriaSQL = """
+            UPDATE category_rule_criteria
+            SET deleted_at = ?, updated_at = ?
+            WHERE rule_id = ?;
+            """
+            var criteriaStatement: OpaquePointer?
+            try prepare(criteriaSQL, statement: &criteriaStatement)
+            defer { sqlite3_finalize(criteriaStatement) }
+
+            sqlite3_bind_double(criteriaStatement, 1, updatedAt.timeIntervalSince1970)
+            sqlite3_bind_double(criteriaStatement, 2, updatedAt.timeIntervalSince1970)
+            sqlite3_bind_text(criteriaStatement, 3, ruleID, -1, SQLITE_TRANSIENT)
+            try step(criteriaStatement)
+
+            try execute("COMMIT;")
+        } catch {
+            try? execute("ROLLBACK;")
+            throw error
+        }
+    }
+
     func applyCategoryRulesToAllEntries(updatedAt: Date = Date()) throws {
         let entries = try loadEntries()
         for entry in entries {
@@ -743,7 +809,11 @@ final class EntryStore {
     func loadColumnValueAssignmentInfo() throws -> [EntryColumnValueKey: AssignmentInfo] {
         let sql = """
         SELECT a.entry_id, c.id, a.source,
-               CASE WHEN a.source = 'category_rule' THEN r.category_name ELSE NULL END
+               CASE
+                   WHEN a.source = 'category_rule' THEN r.category_name
+                   WHEN a.source = 'entry_text_recognition' THEN 'Entry text'
+                   ELSE NULL
+               END
         FROM assignments a
         JOIN entry_columns c ON c.column_definition_id = a.target_id
         JOIN entries e ON e.id = a.entry_id
@@ -783,21 +853,24 @@ final class EntryStore {
         entryID: Entry.ID,
         columnID: EntryColumn.ID,
         value: EntryColumnValue,
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        source: String = "column_edit"
     ) throws {
         let definitionID = try columnDefinitionID(forColumnID: columnID)
         try upsertAssignmentValue(
             entryID: entryID,
             columnDefinitionID: definitionID,
             value: value,
-            updatedAt: updatedAt
+            updatedAt: updatedAt,
+            source: source
         )
         if try columnDefinitionKind(columnDefinitionID: definitionID) == .category {
             try upsertCategoryAssignment(
                 entryID: entryID,
                 columnDefinitionID: definitionID,
                 valueText: value.text,
-                updatedAt: updatedAt
+                updatedAt: updatedAt,
+                source: source
             )
         }
 

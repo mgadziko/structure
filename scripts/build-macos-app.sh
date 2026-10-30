@@ -28,7 +28,7 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key>
     <string>Structure</string>
     <key>CFBundleIdentifier</key>
-    <string>com.structure.prototype</string>
+    <string>net.quantumpenguin.Structure</string>
     <key>CFBundleName</key>
     <string>Structure</string>
     <key>CFBundleDisplayName</key>

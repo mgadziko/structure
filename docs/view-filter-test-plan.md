@@ -168,12 +168,41 @@ Expected result: the target Category cell is filled automatically if it was empt
 
 Expected result: the existing explicit Category value is preserved and not overwritten by the rule.
 
+9. Choose `Criteria > Manage Category Rules...`.
+
+Expected result: the saved rule appears with its target Category and Criteria summary.
+
+10. Delete the saved rule from the manager.
+
+Expected result: the rule disappears from the manager and no longer applies to future edits.
+
+## Apply Category Rules To Current View
+
+1. Save a Criteria-based Category Rule.
+2. Clear a matching Category cell in the current View.
+3. Choose `Criteria > Apply Category Rules to Current View`.
+4. Confirm the dialog.
+
+Expected result: only visible matching Entries in the current View receive rule-filled values, and existing non-empty Category cells are preserved.
+
+## Entry Text Recognition
+
+1. In a Category column, create a reusable Category value such as `Sarah Wells`.
+2. In another secondary column, create prior values such as `Breakfast`, `Lunch`, `Dinner`, and `Dessert`.
+3. Create or edit another Entry and type an exact prior value in the Entry text, such as `Call Sarah Wells about lunch` or `Have cake off the Dessert menu`.
+
+Expected result: the empty matching cell fills automatically with the recognized prior value, such as `Sarah Wells`, `Lunch`, or `Dessert`.
+
+4. Click the automatic-assignment badge.
+
+Expected result: the Assignment inspector shows the source as Entry Text Recognition.
+
 ## Assignment Inspector
 
 1. Save a Criteria-based Category Rule that fills a Category cell.
 2. Look at a cell filled by the rule.
 
-Expected result: the cell shows a subtle rule-created assignment badge.
+Expected result: the cell shows a subtle automatic-assignment badge.
 
 3. Click the badge.
 
